@@ -1,0 +1,21 @@
+spark:
+  app_name: pac_quantile_45
+pipeline:
+  type: ParquetWriter
+  output_path: /home/dataset/kaiyuan/quantile_stat/pac/top45
+  child_configs:
+    # 0.47 * 0.0426 = 0.02
+    - type: FilterByRatio
+      keep_ratio: 0.0426
+      comparison: "smaller"
+      column: "pac_score"
+      quantile_error: 0.001
+      child_configs:
+        - type: FilterByRatio
+          keep_ratio: 0.47
+          comparison: "larger"
+          column: "pac_score"
+          quantile_error: 0.001
+          child_configs:
+            - type: ParquetReader
+              input_path: /home/dataset/cn_dataset/parquets/ZH_dedup_global

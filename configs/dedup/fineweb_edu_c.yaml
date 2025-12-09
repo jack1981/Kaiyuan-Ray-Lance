@@ -1,0 +1,15 @@
+spark:
+  app_name: fineweb_edu_c_dedup
+pipeline:
+  type: ParquetWriter
+  mode: overwrite
+  output_path: /home/zh_dataset/Fineweb_Edu_Chinese_dedup/
+  child_configs:
+    - type: MinHash
+      num_permutations: 128
+      threshold: 0.7
+      num_parallel: 960
+      child_configs:
+        - type: ParquetReader
+          input_path: "/home/dataset/Fineweb_Edu_Chinese/"
+          num_parallel: 960

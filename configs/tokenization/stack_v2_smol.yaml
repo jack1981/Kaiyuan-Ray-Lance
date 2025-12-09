@@ -1,0 +1,104 @@
+spark:
+  app_name: stack_v2_smol
+pipeline:
+  type: ParquetWriter
+  shuffle: False
+  mode: overwrite
+  # select_cols: ["text_tokenized", "files", "snapshot_id", "star_events_count", "fork_events_count"]
+  select_cols: ["text_tokenized", "file_blob_id"]
+  output_path: /home/dataset/code_dataset/tokens/stack_v2_smol
+  child_configs:
+    - type: Tokenization
+      input_col: "content"
+      output_col: "text_tokenized"
+      tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+      child_configs:
+        - type: GroupFlatten
+          cols: ["files", "contents"]
+          sub_cols: ["files.blob_id", "contents.content"]
+          output_cols: ["file_blob_id", "content"]
+          child_configs:
+            - type: FilterByRatio
+              keep_ratio: 0.20
+              comparison: "larger"
+              quantile_error: 0.001
+              column: "star_events_count"
+              child_configs:
+                - type: ParquetReader
+                  input_path: /home/dataset/code_dataset/stack_v2_smol
+                  mergeSchema: "false"
+                  schema:
+                    - name: files
+                      type: array
+                      nullable: true
+                      elementType:
+                        type: struct
+                        fields:
+                          - name: blob_id
+                            type: string
+                            nullable: true
+                          - name: path
+                            type: string
+                            nullable: true
+                          - name: content_id
+                            type: string
+                            nullable: true
+                          - name: language
+                            type: string
+                            nullable: true
+                          - name: length_bytes
+                            type: long
+                            nullable: true
+                          - name: detected_licenses
+                            type: array
+                            nullable: true
+                            elementType:
+                              type: string
+                          - name: license_type
+                            type: string
+                            nullable: true
+                          - name: src_encoding
+                            type: string
+                            nullable: true
+                          - name: is_vendor
+                            type: boolean
+                            nullable: true
+                          - name: is_generated
+                            type: boolean
+                            nullable: true
+                          - name: alphanum_fraction
+                            type: float
+                            nullable: true
+                          - name: alpha_fraction
+                            type: float
+                            nullable: true
+                          - name: num_lines
+                            type: int
+                            nullable: true
+                          - name: avg_line_length
+                            type: float
+                            nullable: true
+                          - name: max_line_length
+                            type: int
+                            nullable: true
+                    - name: contents
+                      type: array
+                      nullable: true
+                      elementType:
+                        type: struct
+                        fields:
+                          - name: content
+                            type: string
+                            nullable: true
+                          - name: download_success
+                            type: boolean
+                            nullable: true
+                    - name: snapshot_id
+                      type: string
+                      nullable: true
+                    - name: star_events_count
+                      type: long
+                      nullable: true
+                    - name: fork_events_count
+                      type: long
+                      nullable: true

@@ -1,0 +1,16 @@
+spark:
+  app_name: cosmopedia-v2-tokens
+pipeline:
+  type: ParquetWriter
+  shuffle: False
+  mode: overwrite
+  select_cols: ["text_tokenized", "token_length", "audience", "format", "seed_data"]
+  output_path: /home/dataset/en_dataset/tokens/institutional-books-1.0
+  child_configs:
+    - type: Tokenization
+      input_col: "text"
+      output_col: "text_tokenized"
+      tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+      child_configs:
+        - type: ParquetReader
+          input_path: /home/dataset/en_dataset/parquets/institutional-books-1.0

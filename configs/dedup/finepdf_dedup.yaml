@@ -1,0 +1,15 @@
+spark:
+  app_name: finepdf_dedup
+pipeline:
+  type: ParquetWriter
+  mode: overwrite
+  output_path: /home/dataset/finepdfs/eng_Latn_dedup/
+  child_configs:
+    - type: MinHash
+      num_permutations: 128
+      threshold: 0.7
+      num_parallel: 960
+      child_configs:
+        - type: ParquetReader
+          input_path: "/home/dataset/finepdfs/eng_Latn/train/"
+          num_parallel: 960

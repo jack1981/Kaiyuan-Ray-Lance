@@ -1,0 +1,21 @@
+spark:
+  app_name: fineweb_c_tokens_v0
+pipeline:
+  type: ParquetWriter
+  output_path: /home/dataset/kaiyuan/v0/full_fineweb_c_tokens
+  shuffle: true
+  select_cols: ["text_tokenized", "score", "source", "duplicate_count"]
+  mode: overwrite
+  child_configs:
+    - type: Tokenization
+      input_col: "text"
+      output_col: "text_tokenized"
+      tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+      child_configs:
+        - type: Selector
+          method: random
+          selection_ratio: 1.0
+          child_configs:
+            - type: ParquetReader
+              input_path: /home/zh_dataset/Fineweb_Edu_Chinese_dedup/part-*.parquet
+              num_parallel: 128

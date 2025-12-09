@@ -1,0 +1,15 @@
+spark:
+  app_name: sample
+pipeline:
+  type: Flatten
+  child_configs:
+    - type: Sampler
+      col: "duplicate_count"
+      child_configs:
+        - type: DuplicateSampleRatio
+          global_sample_rate: 0.1
+          max_sample: 20.0
+          child_configs:
+            - type: ParquetReader
+              input_path: "/home/dataset/dclm_subset_dedup"
+              num_parallel: 32

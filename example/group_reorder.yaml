@@ -1,0 +1,35 @@
+spark:
+  app_name: reorder_test_v2
+pipeline:
+  type: ParquetWriter
+  shuffle: False
+  mode: overwrite
+  output_path: /home/data/group_reorder_test
+  child_configs:
+    - type: InterleavedReorder
+      group_col: type
+      type_num: 2
+      score_cols:
+        - "score"
+        - "fasttext_score"
+      ascending: true
+      child_configs:
+        - type: UnionByName
+          allow_missing_columns: True
+          child_configs:
+            - type: AddConstants
+              constant_list:
+                - 0
+              column_list:
+                - "type"
+              child_configs:
+                - type: ParquetReader
+                  input_path: "/home/data/Fineweb-Chinese/"
+            - type: AddConstants
+              constant_list:
+                - 1
+              column_list:
+                - "type"
+              child_configs:
+                - type: ParquetReader
+                  input_path: "/home/dataset/dclm_subset/"

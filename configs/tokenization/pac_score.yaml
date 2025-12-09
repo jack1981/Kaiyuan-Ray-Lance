@@ -1,0 +1,26 @@
+spark:
+  app_name: ZH_dedup_global_pac_score
+pipeline:
+  type: ParquetWriter
+  output_path: /home/dataset/cn_dataset/tokens/ZH_dedup_global_pac_score
+  shuffle: true
+  select_cols: ["text_tokenized", "pac_score", "duplicate_count"]
+  mode: overwrite
+  child_configs:
+    - type: TokenCounter_v2
+      input_col: "text_tokenized"
+      drop_intermediate: True
+      child_configs:
+        - type: Tokenization
+          input_col: "text"
+          output_col: "text_tokenized"
+          tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+          child_configs:
+            - type: FilterByRatio
+              column: pac_score
+              comparison: 'larger'
+              keep_ratio: 0.30
+              quantile_error: 0.01
+              child_configs:
+                - type: ParquetReader
+                  input_path: /home/dataset/cn_dataset/parquets/ZH_dedup_global

@@ -1,0 +1,50 @@
+spark:
+  app_name: mix_v0
+
+pipeline:
+  type: ParquetWriter
+  output_path: /home/dataset/kaiyuan/v0/stable_phase
+  select_cols: ["text_tokenized"]
+  shuffle: true
+  mode: overwrite
+  child_configs:
+  - type: TokenCounter_v2
+    input_col: "text_tokenized"
+    drop_intermediate: True
+    child_configs:
+    - type: ParquetReader
+      input_path: /home/dataset/kaiyuan/v0/dclm_tokens
+      num_parallel: 128
+      select_cols: ["text_tokenized"]
+  - type: TokenCounter_v2
+    input_col: "text_tokenized"
+    drop_intermediate: True
+    child_configs:
+    - type: ParquetReader
+      input_path: /home/dataset/kaiyuan/v0/fineweb_c_tokens
+      num_parallel: 128
+      select_cols: ["text_tokenized"]
+  - type: Selector
+    selection_ratio: 0.1
+    method: "random"
+    child_configs:
+    - type: TokenCounter_v2
+      input_col: "text_tokenized"
+      drop_intermediate: True
+      child_configs:
+      - type: ParquetReader
+        input_path: /home/dataset/kaiyuan/v0/starcoder_tokens
+        num_parallel: 128
+        select_cols: ["text_tokenized"]
+  - type: Selector
+    selection_ratio: 0.3
+    method: "random"
+    child_configs:
+    - type: TokenCounter_v2
+      input_col: "text_tokenized"
+      drop_intermediate: True
+      child_configs:
+      - type: ParquetReader
+        input_path: /home/dataset/kaiyuan/v0/math_tokens
+        num_parallel: 128
+        select_cols: ["text_tokenized"]

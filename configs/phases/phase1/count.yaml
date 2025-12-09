@@ -1,0 +1,60 @@
+spark:
+  app_name: mix_v0
+
+pipeline:
+  type: UnionByPosition
+  child_configs:
+  - type: TokenCounter_v2
+    input_col: "text_tokenized"
+    drop_intermediate: True
+    task_name: "dclm_count_v0"
+    child_configs:
+    - type: ParquetReader
+      input_path: /home/dataset/en_dataset/tokens/dclm_dedup
+      num_parallel: 128
+      select_cols: ["text_tokenized"]
+  - type: TokenCounter_v2
+    input_col: "text_tokenized"
+    drop_intermediate: True
+    task_name: "fineweb_c_count_v0"
+    child_configs:
+    - type: ParquetReader
+      input_path: /home/dataset/cn_dataset/tokens/fineweb_c_tokens
+      num_parallel: 128
+      select_cols: ["text_tokenized"]
+  - type: TokenCounter_v2
+    input_col: "text_tokenized"
+    drop_intermediate: True
+    task_name: "starcoder_selector_sample_count_v0"
+    child_configs:
+    - type: Selector
+      selection_ratio: 0.1
+      method: "random"
+      child_configs:
+      - type: TokenCounter_v2
+        input_col: "text_tokenized"
+        drop_intermediate: True
+        task_name: "starcoder_selector_v0"
+        child_configs:
+        - type: ParquetReader
+          input_path: /home/dataset/code_dataset/tokens/starcoder_tokens
+          num_parallel: 128
+          select_cols: ["text_tokenized"]
+  - type: TokenCounter_v2
+    input_col: "text_tokenized"
+    drop_intermediate: True
+    task_name: "math_selector_sample_count_v0"
+    child_configs:
+    - type: Selector
+      selection_ratio: 0.3
+      method: "random"
+      child_configs:
+      - type: TokenCounter_v2
+        input_col: "text_tokenized"
+        drop_intermediate: True
+        task_name: "starcoder_selector_v0"
+        child_configs:
+        - type: ParquetReader
+          input_path: /home/dataset/math_dataset/tokens/LLM360_math_dedup
+          num_parallel: 128
+          select_cols: ["text_tokenized"]

@@ -1,0 +1,23 @@
+spark:
+  app_name: slimorca-tokens
+pipeline:
+  type: ParquetWriter
+  shuffle: true
+  mode: overwrite
+  select_cols: ["text_tokenized"]
+  output_path: /home/dataset/sft_dataset/tokens/SlimOrca
+  child_configs:
+    - type: Tokenization
+      input_col: "text"
+      output_col: "text_tokenized"
+      tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+      child_configs:
+        - type: ConversationToParagraph
+          input_col: "conversations"
+          output_col: "text"
+          field_key: "value"
+          separator: "\n"
+          child_configs:
+            - type: JsonReader
+              multiLine: false
+              input_path: "/home/dataset/sft_dataset/parquets/SlimOrca/*.jsonl"

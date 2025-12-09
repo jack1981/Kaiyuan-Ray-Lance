@@ -1,0 +1,21 @@
+spark:
+  app_name: tulu-3-sft-0225-tokens
+pipeline:
+  type: ParquetWriter
+  shuffle: true
+  mode: overwrite
+  select_cols: ["text_tokenized"]
+  output_path: /home/dataset/sft_dataset/tokens/tulu-3-sft-0225/
+  child_configs:
+    - type: Tokenization
+      input_col: "text"
+      output_col: "text_tokenized"
+      tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+      child_configs:
+        - type: ConversationToParagraph
+          input_col: "messages"
+          output_col: "text"
+          separator: "\n"
+          child_configs:
+            - type: ParquetReader
+              input_path: /home/dataset/sft_dataset/parquets/tulu-3-sft-0225/data

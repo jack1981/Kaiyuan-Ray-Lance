@@ -1,0 +1,617 @@
+spark:
+  app_name: main_mix_v3_cma
+pipeline:
+  type: ParquetWriter
+  output_path: /home/dataset/kaiyuan/v3/stable_phase
+  select_cols:
+  - text_tokenized
+  shuffle: false
+  mode: overwrite
+  child_configs:
+  - type: InterleavedReorder
+    group_col: type
+    type_num: 19
+    score_cols:
+    - score_col_0
+    - __random__
+    - __random__
+    - __random__
+    - score_col_4
+    - score_col_5
+    - __random__
+    - __random__
+    - score_col_8
+    - score_col_9
+    - __random__
+    - score_col_11
+    - score_col_13
+    - score_col_14
+    - __random__
+    - score_col_16
+    - score_col_18
+    - __random__
+    - score_col_21
+    ascending: true
+    child_configs:
+    - type: TokenCounter_v2
+      input_col: text_tokenized
+      drop_intermediate: true
+      task_name: Total_Token_Count
+      child_configs:
+      - type: UnionByName
+        allow_missing_columns: true
+        child_configs:
+        - type: AddConstants
+          constant_list:
+          - 0
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: score
+            output_col: score_col_0
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.12
+                  column: score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
+                      select_cols:
+                      - text_tokenized
+                      - score
+        - type: AddConstants
+          constant_list:
+          - 1
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/cn_dataset/tokens/finewiki/zh
+              child_configs:
+              - type: Flatten
+                col: duplicate_count
+                child_configs:
+                - type: Sampler
+                  col: duplicate_count
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/cn_dataset/tokens/finewiki/zh
+                    child_configs:
+                    - type: AddConstants
+                      constant_list:
+                      - 2.0
+                      column_list:
+                      - duplicate_count
+                      child_configs:
+                      - type: ParquetReader
+                        input_path: /home/dataset/cn_dataset/tokens/finewiki/zh
+        - type: AddConstants
+          constant_list:
+          - 2
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/cn_dataset/tokens/undl_zh2en_aligned
+              child_configs:
+              - type: ParquetReader
+                input_path: /home/dataset/cn_dataset/tokens/undl_zh2en_aligned
+        - type: AddConstants
+          constant_list:
+          - 3
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/cn_dataset/tokens/baidu_baike
+              child_configs:
+              - type: ParquetReader
+                input_path: /home/dataset/cn_dataset/tokens/baidu_baike
+        - type: AddConstants
+          constant_list:
+          - 4
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: score
+            output_col: score_col_4
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/en_dataset/tokens/fineweb-edu-dedup
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.5
+                  column: score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/en_dataset/tokens/fineweb-edu-dedup
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/en_dataset/tokens/fineweb-edu-dedup
+                      select_cols:
+                      - text_tokenized
+                      - metadata.score
+        - type: AddConstants
+          constant_list:
+          - 5
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train_prob
+            output_col: score_col_5
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train_prob
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/en_dataset/tokens/dclm_dedup
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.1
+                  column: fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train_prob
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/en_dataset/tokens/dclm_dedup
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/en_dataset/tokens/dclm_dedup
+                      select_cols:
+                      - text_tokenized
+                      - fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train_prob
+        - type: AddConstants
+          constant_list:
+          - 6
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/en_dataset/tokens/finewiki/en
+              child_configs:
+              - type: Flatten
+                col: duplicate_count
+                child_configs:
+                - type: Sampler
+                  col: duplicate_count
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/en_dataset/tokens/finewiki/en
+                    child_configs:
+                    - type: AddConstants
+                      constant_list:
+                      - 2.0
+                      column_list:
+                      - duplicate_count
+                      child_configs:
+                      - type: ParquetReader
+                        input_path: /home/dataset/en_dataset/tokens/finewiki/en
+        - type: AddConstants
+          constant_list:
+          - 7
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/en_dataset/tokens/arxiv
+              child_configs:
+              - type: Selector
+                selection_ratio: 0.6
+                child_configs:
+                - type: TokenCounter_v2
+                  input_col: text_tokenized
+                  drop_intermediate: true
+                  task_name: /home/dataset/en_dataset/tokens/arxiv
+                  child_configs:
+                  - type: ParquetReader
+                    input_path: /home/dataset/en_dataset/tokens/arxiv
+        - type: AddConstants
+          constant_list:
+          - 8
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: score
+            output_col: score_col_8
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/math_dataset/tokens/finemath
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.6
+                  column: score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/math_dataset/tokens/finemath
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/math_dataset/tokens/finemath
+                      select_cols:
+                      - text_tokenized
+                      - score
+        - type: AddConstants
+          constant_list:
+          - 9
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: math_score
+            output_col: score_col_9
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - math_score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/math_dataset/tokens/MegaMath/megamath-web-pro
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.6
+                  column: math_score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/math_dataset/tokens/MegaMath/megamath-web-pro
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/math_dataset/tokens/MegaMath/megamath-web-pro
+                      select_cols:
+                      - text_tokenized
+                      - math_score
+        - type: AddConstants
+          constant_list:
+          - 10
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/code_dataset/tokens/stackexchange
+              child_configs:
+              - type: Selector
+                selection_ratio: 0.4
+                child_configs:
+                - type: TokenCounter_v2
+                  input_col: text_tokenized
+                  drop_intermediate: true
+                  task_name: /home/dataset/code_dataset/tokens/stackexchange
+                  child_configs:
+                  - type: ParquetReader
+                    input_path: /home/dataset/code_dataset/tokens/stackexchange
+        - type: AddConstants
+          constant_list:
+          - 11
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: max_stars_count
+            output_col: score_col_11
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - max_stars_count
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/code_dataset/tokens/starcoder_tokens
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.05
+                  column: max_stars_count
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/code_dataset/tokens/starcoder_tokens
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/code_dataset/tokens/starcoder_tokens
+                      select_cols:
+                      - text_tokenized
+                      - max_stars_count
+        - type: AddConstants
+          constant_list:
+          - 12
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: score
+            output_col: score_col_13
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/code_dataset/tokens/swallow-code-v2
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.4
+                  column: score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/code_dataset/tokens/swallow-code-v2
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/code_dataset/tokens/swallow-code-v2
+                      select_cols:
+                      - text_tokenized
+                      - score
+        - type: AddConstants
+          constant_list:
+          - 13
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: score
+            output_col: score_col_14
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/code_dataset/tokens/python-edu
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.5
+                  column: score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/code_dataset/tokens/python-edu
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/code_dataset/tokens/python-edu
+                      select_cols:
+                      - text_tokenized
+                      - score
+        - type: AddConstants
+          constant_list:
+          - 14
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/en_dataset/tokens/cosmopedia-v2
+              child_configs:
+              - type: Selector
+                selection_ratio: 0.2
+                child_configs:
+                - type: TokenCounter_v2
+                  input_col: text_tokenized
+                  drop_intermediate: true
+                  task_name: /home/dataset/en_dataset/tokens/cosmopedia-v2
+                  child_configs:
+                  - type: ParquetReader
+                    input_path: /home/dataset/en_dataset/tokens/cosmopedia-v2
+        - type: AddConstants
+          constant_list:
+          - 15
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: lm_q1q2_score
+            output_col: score_col_16
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - lm_q1q2_score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/math_dataset/tokens/AutoMathText
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.4
+                  column: lm_q1q2_score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/math_dataset/tokens/AutoMathText
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/math_dataset/tokens/AutoMathText
+                      select_cols:
+                      - text_tokenized
+                      - lm_q1q2_score
+        - type: AddConstants
+          constant_list:
+          - 16
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: math_score
+            output_col: score_col_18
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - math_score
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/math_dataset/tokens/open_web_math
+                child_configs:
+                - type: FilterByRatio
+                  keep_ratio: 0.4
+                  column: math_score
+                  comparison: larger
+                  child_configs:
+                  - type: TokenCounter_v2
+                    input_col: text_tokenized
+                    drop_intermediate: true
+                    task_name: /home/dataset/math_dataset/tokens/open_web_math
+                    child_configs:
+                    - type: ParquetReader
+                      input_path: /home/dataset/math_dataset/tokens/open_web_math
+                      select_cols:
+                      - text_tokenized
+                      - meta.extraction_info.math_score
+        - type: AddConstants
+          constant_list:
+          - 17
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnSelect
+            select_cols:
+            - text_tokenized
+            child_configs:
+            - type: TokenCounter_v2
+              input_col: text_tokenized
+              drop_intermediate: true
+              task_name: After processing /home/dataset/math_dataset/tokens/swallow-math-v2
+              child_configs:
+              - type: Selector
+                selection_ratio: 0.4
+                child_configs:
+                - type: TokenCounter_v2
+                  input_col: text_tokenized
+                  drop_intermediate: true
+                  task_name: /home/dataset/math_dataset/tokens/swallow-math-v2
+                  child_configs:
+                  - type: ParquetReader
+                    input_path: /home/dataset/math_dataset/tokens/swallow-math-v2
+        - type: AddConstants
+          constant_list:
+          - 18
+          column_list:
+          - type
+          child_configs:
+          - type: ColumnAlias
+            input_col: fineweb-edu-classifier
+            output_col: score_col_21
+            child_configs:
+            - type: ColumnSelect
+              select_cols:
+              - text_tokenized
+              - fineweb-edu-classifier
+              child_configs:
+              - type: TokenCounter_v2
+                input_col: text_tokenized
+                drop_intermediate: true
+                task_name: After processing /home/dataset/en_dataset/tokens/eng_Latn_dedup_edu_ascend_top05
+                child_configs:
+                - type: ParquetReader
+                  input_path: /home/dataset/en_dataset/tokens/eng_Latn_dedup_edu_ascend_top05

@@ -1,0 +1,20 @@
+spark:
+  app_name: phase1_detokenization
+pipeline:
+  type: ParquetWriterZstd
+  mode: overwrite
+  select_cols: ["text"]
+  use_coalesce: true
+  output_path: /home/dataset/kaiyuan/phase1
+  merge_count: 32
+  child_configs:
+    - type: BatchDetokenization
+      tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+      input_col: "text_tokenized"
+      output_col: "text"
+      skip_special_tokens: True
+      clean_up_tokenization_spaces: True
+      batch_size: 1000
+      child_configs:
+        - type: ParquetReader
+          input_path: "/home/dataset/kaiyuan/v0/stable_phase"

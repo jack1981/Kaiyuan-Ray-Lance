@@ -1,0 +1,15 @@
+spark:
+  app_name: dclm_dedup
+pipeline:
+  type: ParquetWriter
+  mode: overwrite
+  output_path: /home/en_dataset/dclm_dedup/
+  child_configs:
+    - type: MinHash
+      num_permutations: 128
+      threshold: 0.7
+      num_parallel: 960
+      child_configs:
+        - type: ParquetReader
+          input_path: "/home/dataset/DCLM_Baseline_1.0_parquet/filtered/OH_finepdfs_eng_Latn_bigram_200k_train/"
+          num_parallel: 960

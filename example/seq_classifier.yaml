@@ -1,0 +1,10 @@
+spark:
+  app_name: fasttext
+pipeline:
+  type: SeqClassifierScorer
+  model_path: "/home/model/fineweb-edu-classifier"
+  output_col: "fineweb_score"
+  child_configs:
+    - type: ParquetReader
+      input_path: "/home/data/dclm-baseline-1.0-parquet/filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.parquet"
+      num_parallel: 32

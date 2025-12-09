@@ -1,0 +1,26 @@
+spark:
+  app_name: finepdfs_tokens
+pipeline:
+  type: ParquetWriter
+  output_path: /home/dataset/en_dataset/tokens/eng_Latn_dedup_edu_ascend_top05
+  mode: overwrite
+  shuffle: False
+  select_cols: ["text_tokenized", "fineweb-edu-classifier", "preselect_score", "duplicate_count"]
+  child_configs:
+    - type: TokenCounter_v2
+      input_col: "text_tokenized"
+      drop_intermediate: True
+      child_configs:
+        - type: Tokenization
+          input_col: "text"
+          output_col: "text_tokenized"
+          tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
+          child_configs:
+            - type: FilterByRatio
+              column: fineweb-edu-classifier
+              comparison: 'larger'
+              keep_ratio: 0.05
+              quantile_error: 0.01
+              child_configs:
+                - type: ParquetReader
+                  input_path: /home/dataset/en_dataset/parquets/eng_Latn_dedup_edu_ascend
