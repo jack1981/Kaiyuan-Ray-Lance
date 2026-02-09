@@ -49,6 +49,7 @@ make build
 ```bash
 make prepare-sample
 ```
+`make prepare-sample` is offline-safe and uses synthetic local data only.
 
 ### Prepare Assets For All `example/*.yaml`
 ```bash
@@ -78,6 +79,11 @@ SAMPLE_ROWS=500 make prepare-sample
 Optional offline prep (skip Hugging Face download):
 ```bash
 SOURCE_MODE=synthetic make prepare-examples
+```
+
+Use Hugging Face source explicitly (may download large files):
+```bash
+make prepare-sample-hf
 ```
 
 ## Framework Architecture

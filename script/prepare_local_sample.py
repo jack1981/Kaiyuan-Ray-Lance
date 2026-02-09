@@ -9,20 +9,37 @@ from typing import Iterable, List
 import fasttext
 import pyarrow as pa
 import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download, list_repo_files
+from huggingface_hub import HfApi, hf_hub_download, list_repo_files
 from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast
 
 
-def _pick_first_parquet(repo_id: str) -> str:
-    files = list_repo_files(repo_id=repo_id, repo_type="dataset")
-    parquet_files = sorted([f for f in files if f.endswith(".parquet")])
-    if not parquet_files:
-        raise RuntimeError(f"No parquet files found in dataset repo: {repo_id}")
-    return parquet_files[0]
+def _pick_first_parquet(repo_id: str, max_size_bytes: int | None = None) -> str:
+    api = HfApi()
+    try:
+        entries = list(api.list_repo_tree(repo_id=repo_id, repo_type="dataset", recursive=True))
+        parquet_entries = [e for e in entries if getattr(e, "path", "").endswith(".parquet")]
+        if not parquet_entries:
+            raise RuntimeError(f"No parquet files found in dataset repo: {repo_id}")
+
+        if max_size_bytes is not None:
+            small = [e for e in parquet_entries if getattr(e, "size", None) is not None and e.size <= max_size_bytes]
+            if small:
+                return sorted(small, key=lambda x: (x.size, x.path))[0].path
+
+        with_size = [e for e in parquet_entries if getattr(e, "size", None) is not None]
+        if with_size:
+            return sorted(with_size, key=lambda x: (x.size, x.path))[0].path
+        return sorted(parquet_entries, key=lambda x: x.path)[0].path
+    except Exception:
+        files = list_repo_files(repo_id=repo_id, repo_type="dataset")
+        parquet_files = sorted([f for f in files if f.endswith(".parquet")])
+        if not parquet_files:
+            raise RuntimeError(f"No parquet files found in dataset repo: {repo_id}")
+        return parquet_files[0]
 
 
-def _load_texts_from_hf(dataset: str, rows: int) -> List[str]:
-    source_file = _pick_first_parquet(dataset)
+def _load_texts_from_hf(dataset: str, rows: int, max_size_bytes: int | None = None) -> List[str]:
+    source_file = _pick_first_parquet(dataset, max_size_bytes=max_size_bytes)
     local_file = hf_hub_download(repo_id=dataset, filename=source_file, repo_type="dataset")
     table = pq.read_table(local_file)
 
@@ -185,6 +202,12 @@ def main() -> None:
         default=30,
         help="Timeout for HF metadata/download in auto/hf modes.",
     )
+    parser.add_argument(
+        "--max-hf-parquet-mb",
+        type=int,
+        default=256,
+        help="In auto mode, prefer parquet files at or below this size.",
+    )
     args = parser.parse_args()
 
     data_root = Path(args.data_root)
@@ -206,7 +229,10 @@ def main() -> None:
         old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
         signal.alarm(args.hf_timeout_seconds)
         try:
-            texts = _load_texts_from_hf(args.dataset, args.rows)
+            max_size_bytes = None
+            if args.source_mode == "auto":
+                max_size_bytes = args.max_hf_parquet_mb * 1024 * 1024
+            texts = _load_texts_from_hf(args.dataset, args.rows, max_size_bytes=max_size_bytes)
             source = "huggingface"
         except Exception as exc:
             if args.source_mode == "hf":

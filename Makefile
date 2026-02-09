@@ -1,4 +1,4 @@
-.PHONY: build run run-examples up down logs shell spark-version prepare-sample prepare-examples clean
+.PHONY: build run run-examples up down logs shell spark-version prepare-sample prepare-sample-hf prepare-example prepare-examples clean
 
 build:
 	docker compose build app
@@ -23,9 +23,14 @@ spark-version:
 	docker compose run --rm --build app spark-submit --version
 
 prepare-sample:
-	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode $${SOURCE_MODE:-auto} --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30}
+	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode synthetic --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
+
+prepare-sample-hf:
+	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode $${SOURCE_MODE:-auto} --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
 
 prepare-examples: prepare-sample
+
+prepare-example: prepare-examples
 
 run-examples:
 	docker compose run --rm --build app bash script/run_all_examples.sh
