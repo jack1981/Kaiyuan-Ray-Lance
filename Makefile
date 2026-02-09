@@ -4,7 +4,7 @@ build:
 	docker compose build app
 
 run:
-	@test -f data/sample/pcmind_kaiyuan_2b_sample.parquet || (echo "Missing sample parquet at data/sample/pcmind_kaiyuan_2b_sample.parquet. Run: make prepare-sample"; exit 2)
+	@test -d data/sample/pcmind_kaiyuan_2b_sample.lance || (echo "Missing sample lance dataset at data/sample/pcmind_kaiyuan_2b_sample.lance. Run: make prepare-sample"; exit 2)
 	docker compose run --rm --build app
 
 up:
@@ -20,7 +20,7 @@ shell:
 	docker compose run --rm app bash
 
 spark-version:
-	docker compose run --rm --build app spark-submit --version
+	docker compose run --rm --build app bash -lc 'if [ -n "$${JAVA_HOME:-}" ] && [ ! -x "$${JAVA_HOME}/bin/java" ]; then unset JAVA_HOME; fi; if [ -z "$${JAVA_HOME:-}" ]; then export JAVA_HOME="$$(dirname "$$(dirname "$$(readlink -f "$$(command -v java)")")")"; fi; spark-submit --version'
 
 prepare-sample:
 	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode synthetic --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}

@@ -1,5 +1,3 @@
-import os
-import numpy as np
 from abc import ABC, abstractmethod
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import rand
@@ -7,6 +5,12 @@ from transformers import AutoTokenizer
 
 from datafiner.base import PipelineNode
 from datafiner.register import register
+
+
+def _as_lance_identifier(path: str) -> str:
+    if path.startswith("lance."):
+        return path
+    return f"lance.`{path.replace('`', '``')}`"
 
 
 class DataWriter(PipelineNode, ABC):
@@ -60,22 +64,17 @@ class ParquetWriter(DataWriter):
 
     def _path_exists_and_complete(self) -> bool:
         """
-        Checks if the path exists and contains a _SUCCESS file.
+        Checks if the target output path exists and is non-empty.
         """
-        success_file_path = os.path.join(self.output_path, "_SUCCESS")
-
-        # Get the underlying Java Hadoop FileSystem object from Spark
         fs = self.spark.sparkContext._jvm.org.apache.hadoop.fs.FileSystem.get(
             self.spark.sparkContext._jsc.hadoopConfiguration()
         )
-
-        # Create a Java Hadoop Path object
-        hadoop_success_path = self.spark.sparkContext._jvm.org.apache.hadoop.fs.Path(
-            success_file_path
+        hadoop_output_path = self.spark.sparkContext._jvm.org.apache.hadoop.fs.Path(
+            self.output_path
         )
-
-        # Check if the _SUCCESS file exists.
-        return fs.exists(hadoop_success_path)
+        if not fs.exists(hadoop_output_path):
+            return False
+        return len(fs.listStatus(hadoop_output_path)) > 0
 
     def run(self) -> DataFrame:
         """
@@ -91,10 +90,10 @@ class ParquetWriter(DataWriter):
             # This check will now raise an error if FS fails
             if self._path_exists_and_complete():
                 # 2. If HIT: Read from disk and return.
-                print(f"[ParquetWriter] Cache hit (_SUCCESS found). Reading from path.")
+                print(f"[ParquetWriter] Cache hit. Reading from path.")
 
                 # Read the DataFrame from the cached path
-                df_read = self.spark.read.parquet(self.output_path)
+                df_read = self.spark.read.table(_as_lance_identifier(self.output_path))
 
                 if self.num_read_partitions is not None:
                     print(
@@ -145,7 +144,20 @@ class ParquetWriter(DataWriter):
         print(
             f"[ParquetWriter] Writing data to {self.output_path} (Mode: '{final_write_mode}')"
         )
-        df.write.mode(final_write_mode).parquet(self.output_path)
+        lance_identifier = _as_lance_identifier(self.output_path)
+        writer_v2 = df.writeTo(lance_identifier)
+        if final_write_mode in ("overwrite", "read_if_exists"):
+            writer_v2.using("lance").createOrReplace()
+        elif final_write_mode == "append":
+            writer_v2.append()
+        elif final_write_mode == "ignore":
+            try:
+                writer_v2.using("lance").create()
+            except Exception as exc:
+                if "already exists" not in str(exc).lower():
+                    raise
+        else:
+            writer_v2.using("lance").create()
 
         return df
 
@@ -179,14 +191,15 @@ class ParquetWriterZstd(DataWriter):
         self.merge_count = merge_count
 
     def _path_exists_and_complete(self) -> bool:
-        success_file_path = os.path.join(self.output_path, "_SUCCESS")
         fs = self.spark.sparkContext._jvm.org.apache.hadoop.fs.FileSystem.get(
             self.spark.sparkContext._jsc.hadoopConfiguration()
         )
-        hadoop_success_path = self.spark.sparkContext._jvm.org.apache.hadoop.fs.Path(
-            success_file_path
+        hadoop_output_path = self.spark.sparkContext._jvm.org.apache.hadoop.fs.Path(
+            self.output_path
         )
-        return fs.exists(hadoop_success_path)
+        if not fs.exists(hadoop_output_path):
+            return False
+        return len(fs.listStatus(hadoop_output_path)) > 0
 
     def run(self) -> DataFrame:
         if self.mode == "read_if_exists":
@@ -195,10 +208,8 @@ class ParquetWriterZstd(DataWriter):
             )
 
             if self._path_exists_and_complete():
-                print(
-                    f"[ParquetWriterZstd] Cache hit (_SUCCESS found). Reading from path."
-                )
-                df_read = self.spark.read.parquet(self.output_path)
+                print(f"[ParquetWriterZstd] Cache hit. Reading from path.")
+                df_read = self.spark.read.table(_as_lance_identifier(self.output_path))
 
                 if self.num_read_partitions is not None:
                     print(
@@ -244,17 +255,27 @@ class ParquetWriterZstd(DataWriter):
                 df = df.repartition(self.num_output_files)
 
         print(
-            f"[ParquetWriterZstd] Writing data with Zstd compression (level {self.compression_level}) to {self.output_path}"
+            f"[ParquetWriterZstd] Writing data in Lance format to {self.output_path}"
         )
 
-        # Configure Zstd compression
-        writer = df.write.mode(final_write_mode)
-        writer = writer.option("compression", "zstd")
-        writer = writer.option(
-            "parquet.compression.codec.zstd.level", str(self.compression_level)
-        )
-
-        # Write the parquet file
-        writer.parquet(self.output_path)
+        lance_identifier = _as_lance_identifier(self.output_path)
+        writer_v2 = df.writeTo(lance_identifier)
+        if final_write_mode in ("overwrite", "read_if_exists"):
+            writer_v2.using("lance").createOrReplace()
+        elif final_write_mode == "append":
+            writer_v2.append()
+        elif final_write_mode == "ignore":
+            try:
+                writer_v2.using("lance").create()
+            except Exception as exc:
+                if "already exists" not in str(exc).lower():
+                    raise
+        else:
+            writer_v2.using("lance").create()
 
         return df
+
+
+@register("LanceWriter")
+class LanceWriter(ParquetWriter):
+    pass

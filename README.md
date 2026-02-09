@@ -38,7 +38,7 @@ _Note: We do not provide any dataset in this repository. You need to acquire the
 
 ## Docker (Local Mode Only)
 
-This Docker setup is intended for **Spark local mode** only and pins Spark to **3.5.8**. For YARN/cluster usage, continue to use `script/run_yarn.sh` outside Docker.
+This Docker setup is intended for **Spark local mode** only and pins Spark to **3.5.8**. The local pipeline runs on **Lance format** via `lance-spark`. For YARN/cluster usage, continue to use `script/run_yarn.sh` outside Docker.
 
 ### Build
 ```bash
@@ -84,6 +84,11 @@ SOURCE_MODE=synthetic make prepare-examples
 Use Hugging Face source explicitly (may download large files):
 ```bash
 make prepare-sample-hf
+```
+
+Check Spark version in container:
+```bash
+make spark-version
 ```
 
 ## Framework Architecture

@@ -4,18 +4,24 @@ set -euo pipefail
 CONFIG_DIR=${1:-example}
 
 required_files=(
-  "/data/sample/pcmind_kaiyuan_2b_sample.parquet"
-  "/data/sample/scored_input.parquet"
-  "/data/sample/fineweb_chinese.parquet"
-  "/data/sample/dclm_subset.parquet"
-  "/data/sample/dclm_subset_dedup.parquet"
+  "/data/sample/pcmind_kaiyuan_2b_sample.lance"
+  "/data/sample/scored_input.lance"
+  "/data/sample/fineweb_chinese.lance"
+  "/data/sample/dclm_subset.lance"
+  "/data/sample/dclm_subset_dedup.lance"
   "/data/models/fasttext_hq.bin"
   "/data/models/fasttext_mmlu.bin"
   "/data/models/tiny_seq_classifier/config.json"
 )
 
 for file in "${required_files[@]}"; do
-  if [ ! -f "$file" ]; then
+  if [[ "$file" == *.lance ]]; then
+    [ -d "$file" ] || {
+      echo "Missing required asset: $file"
+      echo "Run: make prepare-examples"
+      exit 2
+    }
+  elif [ ! -f "$file" ]; then
     echo "Missing required asset: $file"
     echo "Run: make prepare-examples"
     exit 2

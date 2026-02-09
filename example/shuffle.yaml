@@ -8,5 +8,5 @@ pipeline:
     - type: Shuffler
       child_configs:
         - type: ParquetReader
-          input_path: "/data/sample/scored_input.parquet"
+          input_path: "/data/sample/scored_input.lance"
           num_parallel: 2

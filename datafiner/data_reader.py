@@ -11,6 +11,12 @@ from datafiner.register import register
 from pyspark.sql.types import *
 
 
+def _as_lance_identifier(path: str) -> str:
+    if path.startswith("lance."):
+        return path
+    return f"lance.`{path.replace('`', '``')}`"
+
+
 def parse_spark_type(field):
     """Parse both primitive and complex (array, struct) types from YAML."""
 
@@ -23,12 +29,6 @@ def parse_spark_type(field):
         "float": FloatType(),
         "binary": BinaryType(),
     }
-    print(field)
-    print(type(field))
-    print(isinstance(field, str))
-    print(field["type"] not in primitive_types)
-    print("string" not in primitive_types)
-
     # ---- Case 1: primitive type as string ----
     if field.get("type", None) in primitive_types:
         return primitive_types[field["type"]]
@@ -57,7 +57,6 @@ def parse_spark_type(field):
 def build_schema(fields_yaml):
     struct_fields = []
     for f in fields_yaml:
-        print(f)
         struct_fields.append(
             StructField(f["name"], parse_spark_type(f), bool(f.get("nullable", True)))
         )
@@ -117,12 +116,17 @@ class ParquetReader(DataReader):
             reader = reader.schema(self.schema)
 
         if isinstance(self.input_path, list):
-            df = reader.parquet(*self.input_path)
+            paths = list(self.input_path)
+            if not paths:
+                raise ValueError("input_path list is empty")
+            df = self.spark.table(_as_lance_identifier(paths[0]))
+            for path in paths[1:]:
+                df = df.unionByName(self.spark.table(_as_lance_identifier(path)), allowMissingColumns=True)
         else:
-            df = reader.parquet(self.input_path)
+            df = self.spark.table(_as_lance_identifier(self.input_path))
 
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
 
         print(f"Number of rows: {df.count()}")
 
@@ -170,12 +174,17 @@ class ParquetReaderZstd(DataReader):
             reader = reader.schema(self.schema)
 
         if isinstance(self.input_path, list):
-            df = reader.parquet(*self.input_path)
+            paths = list(self.input_path)
+            if not paths:
+                raise ValueError("input_path list is empty")
+            df = self.spark.table(_as_lance_identifier(paths[0]))
+            for path in paths[1:]:
+                df = df.unionByName(self.spark.table(_as_lance_identifier(path)), allowMissingColumns=True)
         else:
-            df = reader.parquet(self.input_path)
+            df = self.spark.table(_as_lance_identifier(self.input_path))
 
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
 
         print(f"Number of rows: {df.count()}")
 
@@ -183,6 +192,11 @@ class ParquetReaderZstd(DataReader):
             df = df.repartition(self.num_parallel)
 
         return df
+
+
+@register("LanceReader")
+class LanceReader(ParquetReader):
+    pass
 
 
 @register("JsonlZstReader")
@@ -203,7 +217,7 @@ class JsonlZstReader(DataReader):
         else:
             df = self.spark.read.json(self.input_path)
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
         if self.num_parallel is not None:
             df = df.repartition(self.num_parallel)
         return df
@@ -241,7 +255,7 @@ class JsonReader(DataReader):
             df = reader.json(self.input_path)
 
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
 
         if self.num_parallel is not None:
             df = df.repartition(self.num_parallel)
@@ -273,7 +287,7 @@ class FormatReader(DataReader):
         else:
             df = self.spark.read.format(self.data_format).load(self.input_path)
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
         if self.num_parallel is not None:
             df = df.repartition(self.num_parallel)
         return df
@@ -335,7 +349,7 @@ class NpyReader(DataReader):
             df = self.spark.createDataFrame(parsed_rdd, schema)
 
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
 
         if self.num_parallel is not None:
             df = df.repartition(self.num_parallel)

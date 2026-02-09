@@ -4,7 +4,7 @@ pipeline:
   type: ParquetWriter
   shuffle: false
   mode: overwrite
-  output_path: /data/output/group_reorder_test
+  output_path: /data/output/group_reorder_test.lance
   child_configs:
     - type: InterleavedReorder
       group_col: type
@@ -24,7 +24,7 @@ pipeline:
                 - "type"
               child_configs:
                 - type: ParquetReader
-                  input_path: "/data/sample/fineweb_chinese.parquet"
+                  input_path: "/data/sample/fineweb_chinese.lance"
             - type: AddConstants
               constant_list:
                 - 1
@@ -32,4 +32,4 @@ pipeline:
                 - "type"
               child_configs:
                 - type: ParquetReader
-                  input_path: "/data/sample/dclm_subset.parquet"
+                  input_path: "/data/sample/dclm_subset.lance"

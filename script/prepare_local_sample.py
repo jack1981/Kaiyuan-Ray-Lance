@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import signal
+import shutil
 from pathlib import Path
 from typing import Iterable, List
 
@@ -10,7 +11,49 @@ import fasttext
 import pyarrow as pa
 import pyarrow.parquet as pq
 from huggingface_hub import HfApi, hf_hub_download, list_repo_files
+from pyspark.sql import SparkSession
 from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast
+
+
+_LANCE_SPARK_SESSION = None
+
+
+def _as_lance_identifier(path: str) -> str:
+    if path.startswith("lance."):
+        return path
+    return f"lance.`{path.replace('`', '``')}`"
+
+
+def _get_lance_spark_session() -> SparkSession:
+    global _LANCE_SPARK_SESSION
+    if _LANCE_SPARK_SESSION is not None:
+        return _LANCE_SPARK_SESSION
+
+    builder = (
+        SparkSession.builder.appName("prepare_local_sample_lance")
+        .master("local[*]")
+        .config("spark.sql.catalog.lance", "com.lancedb.lance.spark.LanceCatalog")
+        .config("spark.sql.extensions", "com.lancedb.lance.spark.extensions.LanceSparkSessionExtensions")
+        .config("spark.sql.shuffle.partitions", "8")
+    )
+
+    spark_home = os.environ.get("SPARK_HOME")
+    lance_jar = None
+    if spark_home:
+        for candidate in sorted(Path(spark_home).glob("jars/lance-spark-bundle*.jar")):
+            lance_jar = str(candidate)
+            break
+
+    if lance_jar:
+        builder = builder.config("spark.jars", lance_jar)
+    else:
+        lance_pkg = os.environ.get(
+            "LANCE_SPARK_PACKAGE", "com.lancedb:lance-spark-bundle-3.5_2.12:0.0.15"
+        )
+        builder = builder.config("spark.jars.packages", lance_pkg)
+
+    _LANCE_SPARK_SESSION = builder.getOrCreate()
+    return _LANCE_SPARK_SESSION
 
 
 def _pick_first_parquet(repo_id: str, max_size_bytes: int | None = None) -> str:
@@ -94,10 +137,18 @@ def _fallback_texts(rows: int) -> List[str]:
     return out
 
 
-def _write_parquet(path: Path, rows: Iterable[dict]) -> None:
+def _write_lance(path: Path, rows: Iterable[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
     table = pa.Table.from_pylist(list(rows))
-    pq.write_table(table, str(path))
+    spark = _get_lance_spark_session()
+    spark.createDataFrame(table.to_pandas()).writeTo(_as_lance_identifier(str(path))).using(
+        "lance"
+    ).createOrReplace()
 
 
 def _build_scored_rows(texts: List[str]) -> List[dict]:
@@ -249,17 +300,17 @@ def main() -> None:
 
     scored_rows = _build_scored_rows(texts)
 
-    base_path = sample_dir / "pcmind_kaiyuan_2b_sample.parquet"
-    scored_path = sample_dir / "scored_input.parquet"
-    fineweb_path = sample_dir / "fineweb_chinese.parquet"
-    dclm_subset_path = sample_dir / "dclm_subset.parquet"
-    dedup_subset_path = sample_dir / "dclm_subset_dedup.parquet"
+    base_path = sample_dir / "pcmind_kaiyuan_2b_sample.lance"
+    scored_path = sample_dir / "scored_input.lance"
+    fineweb_path = sample_dir / "fineweb_chinese.lance"
+    dclm_subset_path = sample_dir / "dclm_subset.lance"
+    dedup_subset_path = sample_dir / "dclm_subset_dedup.lance"
 
-    _write_parquet(base_path, ({"text": t} for t in texts))
-    _write_parquet(scored_path, scored_rows)
-    _write_parquet(fineweb_path, scored_rows)
-    _write_parquet(dclm_subset_path, scored_rows)
-    _write_parquet(dedup_subset_path, scored_rows)
+    _write_lance(base_path, ({"text": t} for t in texts))
+    _write_lance(scored_path, scored_rows)
+    _write_lance(fineweb_path, scored_rows)
+    _write_lance(dclm_subset_path, scored_rows)
+    _write_lance(dedup_subset_path, scored_rows)
 
     hq_train_path = model_dir / "fasttext_hq_train.txt"
     mmlu_train_path = model_dir / "fasttext_mmlu_train.txt"
@@ -297,6 +348,11 @@ def main() -> None:
     manifest_path = sample_dir / "manifest.json"
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    global _LANCE_SPARK_SESSION
+    if _LANCE_SPARK_SESSION is not None:
+        _LANCE_SPARK_SESSION.stop()
+        _LANCE_SPARK_SESSION = None
 
     print("Prepared local assets for all examples:")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))

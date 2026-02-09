@@ -2,7 +2,7 @@ spark:
   app_name: read_write
 pipeline:
   type: ParquetWriter
-  output_path: /data/output/read_write
+  output_path: /data/output/read_write.lance
   child_configs:
     - type: ParquetReader
-      input_path: "/data/sample/pcmind_kaiyuan_2b_sample.parquet"
+      input_path: "/data/sample/pcmind_kaiyuan_2b_sample.lance"

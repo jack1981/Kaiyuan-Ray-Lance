@@ -7,11 +7,17 @@ from datafiner.register import register
 from typing import Tuple
 
 
+def _as_lance_identifier(path: str) -> str:
+    if path.startswith("lance."):
+        return path
+    return f"lance.`{path.replace('`', '``')}`"
+
+
 @register("Splitter")
 class Splitter(PipelineNode):
     """
     Splits a DataFrame into two disjoint sets (training and validation)
-    and writes them to specified Parquet output paths.
+    and writes them to specified Lance output paths.
 
     Includes two methods for splitting:
     - 'exact': Guarantees an exact number of rows in the training set.
@@ -69,7 +75,7 @@ class Splitter(PipelineNode):
             df = df.orderBy(F.rand())
 
         if self.select_cols is not None:
-            df = df.select(self.select_cols)
+            df = df.select(*self.select_cols)
 
         # 2. Perform the split using the chosen method
         if self.split_method == "exact":
@@ -90,6 +96,7 @@ class Splitter(PipelineNode):
             val_df,
             self.val_file,
             self.num_val_files,
+            False,
             f"Splitter: Writing VALIDATION split to {self.val_file}",
         )
 
@@ -115,11 +122,21 @@ class Splitter(PipelineNode):
             print("Shuffling training data before writing...")
             df = df.orderBy(F.rand())
             df.show(10)
-        writer = df.write.mode(self.mode)
         if num_files:
-            df.repartition(num_files).write.mode(self.mode).parquet(path)
+            df = df.repartition(num_files)
+
+        lance_identifier = _as_lance_identifier(path)
+        writer_v2 = df.writeTo(lance_identifier)
+        if self.mode == "append":
+            writer_v2.append()
+        elif self.mode == "ignore":
+            try:
+                writer_v2.using("lance").create()
+            except Exception as exc:
+                if "already exists" not in str(exc).lower():
+                    raise
         else:
-            writer.parquet(path)
+            writer_v2.using("lance").createOrReplace()
 
         # Clear the description after the action is complete
         self.spark.sparkContext.setJobDescription(None)

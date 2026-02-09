@@ -2,7 +2,7 @@ spark:
   app_name: mmlu_fasttext
 pipeline:
   type: ParquetWriter
-  output_path: "/data/output/mmlu_filtered_g0l0"
+  output_path: "/data/output/mmlu_filtered_g0l0.lance"
   child_configs:
     - type: FastTextFilter
       model_path: "/data/models/fasttext_mmlu.bin"
@@ -11,5 +11,5 @@ pipeline:
       selected_label: "__label__mmlu_"
       child_configs:
         - type: ParquetReader
-          input_path: "/data/sample/scored_input.parquet"
+          input_path: "/data/sample/scored_input.lance"
           num_parallel: 2
