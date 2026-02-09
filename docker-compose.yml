@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ./data:/data
+    environment:
+      PIPELINE_CONFIG: ${PIPELINE_CONFIG:-example/read_write.yaml}
+      SPARK_MASTER: ${SPARK_MASTER:-local[*]}
+      PYSPARK_PYTHON: ${PYSPARK_PYTHON:-python}
+      SPARK_HOME: /opt/spark
+      DRIVER_MAX_RESULT_SIZE: ${DRIVER_MAX_RESULT_SIZE:-2G}
+      DRIVER_MEMORY: ${DRIVER_MEMORY:-4G}
+      EXECUTOR_MEMORY: ${EXECUTOR_MEMORY:-4G}
+      EXECUTOR_MEMORY_OVERHEAD: ${EXECUTOR_MEMORY_OVERHEAD:-2G}
+      EXECUTOR_CORES: ${EXECUTOR_CORES:-2}
+      EXECUTOR_INSTANCES: ${EXECUTOR_INSTANCES:-2}
+    command: bash -lc "bash script/run_local.sh main.py $$PIPELINE_CONFIG"

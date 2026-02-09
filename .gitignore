@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# Local runtime artifacts
+/data/sample/
+/data/output/
+/datafiner/__pycache__/
+/datafiner/deduplication/__pycache__/
+/script/__pycache__/

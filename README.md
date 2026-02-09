@@ -36,6 +36,35 @@ This basic pipeline demonstrates reading from Parquet files and writing back to 
 
 _Note: We do not provide any dataset in this repository. You need to acquire the datasets according to their names._
 
+## Docker (Local Mode Only)
+
+This Docker setup is intended for **Spark local mode** only and pins Spark to **3.5.8**. For YARN/cluster usage, continue to use `script/run_yarn.sh` outside Docker.
+
+### Build
+```bash
+make build
+```
+
+### Prepare Small Local Sample (from Hugging Face)
+```bash
+make prepare-sample
+```
+
+### Run (Default Example)
+```bash
+make run
+```
+
+### Run (Custom Config)
+```bash
+PIPELINE_CONFIG=/workspace/<path>.yaml make run
+```
+
+Optional sample size override:
+```bash
+SAMPLE_ROWS=500 make prepare-sample
+```
+
 ## Framework Architecture
 
 ### Core Components (`datafiner/`)

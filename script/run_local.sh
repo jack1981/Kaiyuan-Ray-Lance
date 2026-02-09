@@ -1,22 +1,53 @@
-DRIVER_MAX_RESULT_SIZE=8G
-DRIVER_MEMORY=16G
-EXECUTOR_MEMORY=16G
-EXECUTOR_MEMORY_OVERHEAD=16G
-EXECUTOR_CORES=4
-EXECUTOR_INSTANCES=16
+#!/usr/bin/env bash
 
-SCRIPT=$1
-CONFIG_FILE=$2
+set -euo pipefail
+
+DRIVER_MAX_RESULT_SIZE=${DRIVER_MAX_RESULT_SIZE:-8G}
+DRIVER_MEMORY=${DRIVER_MEMORY:-16G}
+EXECUTOR_MEMORY=${EXECUTOR_MEMORY:-16G}
+EXECUTOR_MEMORY_OVERHEAD=${EXECUTOR_MEMORY_OVERHEAD:-16G}
+EXECUTOR_CORES=${EXECUTOR_CORES:-4}
+EXECUTOR_INSTANCES=${EXECUTOR_INSTANCES:-16}
+SPARK_MASTER=${SPARK_MASTER:-local[*]}
+
+SCRIPT=${1:-}
+CONFIG_FILE=${2:-}
+
+if [ -z "$SCRIPT" ] || [ -z "$CONFIG_FILE" ]; then
+  echo "Usage: bash script/run_local.sh <script.py> <config.yaml>" >&2
+  exit 2
+fi
+
+if [ -z "${SPARK_HOME:-}" ]; then
+  echo "SPARK_HOME is not set." >&2
+  exit 2
+fi
+
+if [ ! -x "${SPARK_HOME}/bin/spark-submit" ]; then
+  echo "spark-submit not found at ${SPARK_HOME}/bin/spark-submit" >&2
+  exit 2
+fi
+
+# If JAVA_HOME is invalid, let Spark fall back to java on PATH.
+if [ -n "${JAVA_HOME:-}" ] && [ ! -x "${JAVA_HOME}/bin/java" ]; then
+  echo "Invalid JAVA_HOME=${JAVA_HOME}; falling back to java from PATH." >&2
+  unset JAVA_HOME
+fi
+
+if ! command -v java >/dev/null 2>&1; then
+  echo "java not found on PATH. Please install a JRE (Java 17 recommended)." >&2
+  exit 2
+fi
 
 export PYTHONPATH=./
 
-${SPARK_HOME}/bin/spark-submit \
-    --master local[*] \
-    --conf spark.driver.maxResultSize=$DRIVER_MAX_RESULT_SIZE \
-    --conf spark.driver.memory=$DRIVER_MEMORY \
-    --conf spark.executor.memory=$EXECUTOR_MEMORY \
-    --conf spark.executor.memoryOverhead=$EXECUTOR_MEMORY_OVERHEAD \
-    --conf spark.executor.cores=$EXECUTOR_CORES \
-    --conf spark.executor.instances=$EXECUTOR_INSTANCES \
-    $1 \
-    --config $CONFIG_FILE
+"${SPARK_HOME}/bin/spark-submit" \
+  --master "${SPARK_MASTER}" \
+  --conf "spark.driver.maxResultSize=${DRIVER_MAX_RESULT_SIZE}" \
+  --conf "spark.driver.memory=${DRIVER_MEMORY}" \
+  --conf "spark.executor.memory=${EXECUTOR_MEMORY}" \
+  --conf "spark.executor.memoryOverhead=${EXECUTOR_MEMORY_OVERHEAD}" \
+  --conf "spark.executor.cores=${EXECUTOR_CORES}" \
+  --conf "spark.executor.instances=${EXECUTOR_INSTANCES}" \
+  "$SCRIPT" \
+  --config "$CONFIG_FILE"

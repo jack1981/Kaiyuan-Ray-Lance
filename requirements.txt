@@ -2,3 +2,11 @@ transformers
 fasttext
 torch
 jieba
+scipy
+numpy
+pandas
+regex
+PyYAML
+pyspark==3.5.8
+pyarrow
+huggingface-hub
