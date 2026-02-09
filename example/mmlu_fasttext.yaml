@@ -1,15 +1,15 @@
 spark:
-  app_name: fasttext
+  app_name: mmlu_fasttext
 pipeline:
   type: ParquetWriter
-  output_path: "/home/data/mmlu_filtered_g0l0"
+  output_path: "/data/output/mmlu_filtered_g0l0"
   child_configs:
     - type: FastTextFilter
-      model_path: "/home/data_scorer/test_fasttext/mmlu_cc_pre_overfit/model.bin"
+      model_path: "/data/models/fasttext_mmlu.bin"
       num_labels: 2
-      threshold: 0.030
+      threshold: 0.03
       selected_label: "__label__mmlu_"
       child_configs:
         - type: ParquetReader
-          input_path: "/home/data/dclm-baseline-1.0-parquet/filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_01_of_10/local-shard_0_of_10/*.parquet"
-          num_parallel: 32
+          input_path: "/data/sample/scored_input.parquet"
+          num_parallel: 2

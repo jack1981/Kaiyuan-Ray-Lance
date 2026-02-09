@@ -176,8 +176,13 @@ class SeqClassifierScorer(TextScorer):
             )
             with torch.no_grad():
                 outputs = score_udf.model(**input_id)
-                logits = outputs.logits.squeeze(-1).float().numpy()
-            return float(logits[selected_index])
+                logits = outputs.logits.detach().cpu().float().numpy()
+
+            if logits.ndim == 2:
+                return float(logits[0][selected_index])
+            if logits.ndim == 1:
+                return float(logits[selected_index])
+            return float(logits.reshape(-1)[selected_index])
 
         func = F.udf(score_udf, FloatType())
         result = df.withColumn(self.output_col, func(F.col(self.input_col)))

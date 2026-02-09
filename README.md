@@ -50,9 +50,19 @@ make build
 make prepare-sample
 ```
 
+### Prepare Assets For All `example/*.yaml`
+```bash
+make prepare-examples
+```
+
 ### Run (Default Example)
 ```bash
 make run
+```
+
+### Run All Example Configs
+```bash
+make run-examples
 ```
 
 ### Run (Custom Config)
@@ -63,6 +73,11 @@ PIPELINE_CONFIG=/workspace/<path>.yaml make run
 Optional sample size override:
 ```bash
 SAMPLE_ROWS=500 make prepare-sample
+```
+
+Optional offline prep (skip Hugging Face download):
+```bash
+SOURCE_MODE=synthetic make prepare-examples
 ```
 
 ## Framework Architecture

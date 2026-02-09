@@ -11,5 +11,5 @@ pipeline:
           max_sample: 20.0
           child_configs:
             - type: ParquetReader
-              input_path: "/home/dataset/dclm_subset_dedup"
-              num_parallel: 32
+              input_path: "/data/sample/dclm_subset_dedup.parquet"
+              num_parallel: 2

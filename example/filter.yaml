@@ -3,13 +3,13 @@ spark:
 pipeline:
   type: Visualizer
   num_rows: 10
-  vertical: True
+  vertical: true
   child_configs:
     - type: FilterByRatio
       column: fasttext_score
       comparison: "larger"
-      keep_ratio: 0.02
+      keep_ratio: 0.2
       child_configs:
         - type: ParquetReader
-          input_path: "/home/data/dclm-baseline-1.0-parquet/filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.parquet"
-          num_parallel: 8
+          input_path: "/data/sample/scored_input.parquet"
+          num_parallel: 2

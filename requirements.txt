@@ -2,9 +2,9 @@ transformers
 fasttext
 torch
 jieba
-scipy
-numpy
-pandas
+scipy==1.11.4
+numpy==1.26.4
+pandas==2.2.3
 regex
 PyYAML
 pyspark==3.5.8

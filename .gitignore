@@ -4,6 +4,7 @@ __pycache__/
 # Local runtime artifacts
 /data/sample/
 /data/output/
+/data/models/
 /datafiner/__pycache__/
 /datafiner/deduplication/__pycache__/
 /script/__pycache__/
