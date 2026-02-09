@@ -14,6 +14,15 @@ This framework provides a tree-structured pipeline framework for large-scale dat
 - **Modular**: Extensible pipeline nodes for custom operations
 - **Production-ready**: Supports both local development and YARN cluster deployment
 
+## Lance-Spark Integration (This Branch)
+
+This branch migrates local Spark I/O to [Lance](https://lancedb.github.io/lance/) via `lance-spark` on Spark `3.5.8`.
+
+- **Spark local mode in Docker uses Lance tables** for read/write operations.
+- **Example assets are prepared as `.lance` datasets** under `data/sample/`.
+- **Pipeline node names remain stable** (`ParquetReader`, `ParquetWriter`) for config compatibility, but they are refactored to Lance-backed reads/writes in local Docker flow.
+- **Refactoring scope**: runtime bootstrap (`Dockerfile`, `docker-compose.yml`, `script/run_local.sh`), sample preparation (`script/prepare_local_sample.py`), and DataFrame I/O paths (`datafiner/data_reader.py`, `datafiner/data_writer.py`, `datafiner/splitter.py`).
+
 ## Quick Start
 
 ### Environment Setup
@@ -32,13 +41,21 @@ Modify the paths accordingly in `example/read_write.yaml` and execute:
 bash script/run_yarn.sh main.py example/read_write.yaml
 ```
 
-This basic pipeline demonstrates reading from Parquet files and writing back to Parquet format.
+This basic pipeline demonstrates reading data and writing results through the configured pipeline I/O path.
 
 _Note: We do not provide any dataset in this repository. You need to acquire the datasets according to their names._
 
 ## Docker (Local Mode Only)
 
-This Docker setup is intended for **Spark local mode** only and pins Spark to **3.5.8**. The local pipeline runs on **Lance format** via `lance-spark`. For YARN/cluster usage, continue to use `script/run_yarn.sh` outside Docker.
+This Docker setup is intended for **Spark local mode** only and pins Spark to **3.5.8**. The local pipeline runs on **Lance format** via `lance-spark`.
+
+Key local runtime behaviors:
+
+- Spark session loads Lance catalog/extensions through `script/run_local.sh`.
+- Sample preparation writes `.lance` datasets and lightweight local model assets.
+- `make run-examples` validates all `example/*.yaml` pipelines against local Lance data.
+
+For YARN/cluster usage, continue to use `script/run_yarn.sh` outside Docker.
 
 ### Build
 ```bash
@@ -106,7 +123,7 @@ The framework provides a comprehensive set of pipeline nodes. Some examples:
 | **Deduplication**   | `deduplication/minhash.py` | MinHash-based near-duplicate detection                                 |
 | **Group Mixing**    | `group_reorder.py`         | Stratified data mixing (see [paper](https://arxiv.org/abs/2512.07612)) |
 | **Quality Scoring** | `text_scorer.py`           | FastText-based text quality assessment                                 |
-| **I/O Operations**  | `reader.py`, `writer.py`   | Parquet, JSON, and custom format support                               |
+| **I/O Operations**  | `data_reader.py`, `data_writer.py`   | Lance-backed table I/O (local), plus JSON and custom format support                               |
 
 Other specific pipeline nodes definition can see `datafiner/`. All nodes inherit from base classes in `base.py`, making it straightforward to implement custom operations.
 
@@ -114,7 +131,7 @@ Other specific pipeline nodes definition can see `datafiner/`. All nodes inherit
 
 Starter templates for common operations. Some examples:
 
-- **`read_write.yaml`**: Basic I/O pipeline (read from and write to Parquet files)
+- **`read_write.yaml`**: Basic I/O pipeline (read/write over local Lance sample data)
 - **`dedup.yaml`**: Deduplication pipeline using MinHash
 - **`filter.yaml`**: Quality filtering based on score metrics
 - **`reorder.yaml`**: Data sorting and shuffling examples
@@ -154,7 +171,7 @@ Score-based data sampling around target quality percentiles
 
 ### 4. Tokenization (`tokenization/`)
 
-Tokenization pipelines for various source datasets (JSON, Parquet)
+Tokenization pipelines for various source datasets (JSON, Lance)
 
 ### 5. Phase Construction (`phases/`)
 
@@ -195,21 +212,21 @@ spark:
 
 pipeline:
   type: ParquetWriter
-  output_path: /output/path
+  output_path: /output/path.lance
   child_configs:
     - type: Filter
       filter_col: quality_score
       threshold: 0.7
       child_configs:
         - type: ParquetReader
-          input_path: /input/path/*.parquet
+          input_path: /input/path.lance
 ```
 
 Pipelines are defined as trees where:
 
-- **Leaf nodes**: Data readers (ParquetReader, JsonReader, etc.)
+- **Leaf nodes**: Data readers (ParquetReader/LanceReader, JsonReader, etc.)
 - **Internal nodes**: Transformations (Filter, Dedup, Reorder, etc.)
-- **Root node**: Data writers (ParquetWriter, etc.)
+- **Root node**: Data writers (ParquetWriter/LanceWriter, etc.)
 
 ## Advanced Features
 
