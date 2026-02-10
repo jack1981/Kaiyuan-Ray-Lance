@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: minio-init
-  namespace: kaiyuan-spark
+  namespace: kaiyuan-ray
 spec:
   backoffLimit: 5
   template:
@@ -20,14 +20,13 @@ spec:
             - |
               set -eu
               for i in $(seq 1 60); do
-                if mc alias set local http://minio.kaiyuan-spark.svc.cluster.local:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; then
+                if mc alias set local http://minio.kaiyuan-ray.svc.cluster.local:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; then
                   break
                 fi
                 sleep 2
               done
-              mc mb -p local/kaiyuan-spark || true
-              mc mb -p local/kaiyuan-spark/spark-upload || true
-              mc mb -p local/kaiyuan-spark/sample || true
-              mc mb -p local/kaiyuan-spark/output || true
-              mc mb -p local/kaiyuan-spark/models || true
-              printf '' | mc pipe local/kaiyuan-spark/spark-events/.keep || true
+              mc mb -p local/kaiyuan-ray || true
+              mc mb -p local/kaiyuan-ray/sample || true
+              mc mb -p local/kaiyuan-ray/output || true
+              mc mb -p local/kaiyuan-ray/models || true
+              mc mb -p local/kaiyuan-ray/ray-artifacts || true

@@ -47,11 +47,13 @@ def build_tiny_seq_classifier_archive(source_dir: Path) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Sync local example assets into MinIO for Spark-on-K8s")
-    parser.add_argument("--data-root", default="/data")
+    parser = argparse.ArgumentParser(
+        description="Sync local example assets into MinIO for Ray-on-K8s"
+    )
+    parser.add_argument("--data-root", default="data")
     parser.add_argument("--endpoint", default="host.docker.internal:30900")
     parser.add_argument("--scheme", default="http", choices=["http", "https"])
-    parser.add_argument("--bucket", default="kaiyuan-spark")
+    parser.add_argument("--bucket", default="kaiyuan-ray")
     parser.add_argument("--access-key", default="minio")
     parser.add_argument("--secret-key", default="minio123")
     parser.add_argument("--region", default="us-east-1")
@@ -96,7 +98,7 @@ def main() -> None:
     fs.create_dir(f"{bucket}/sample", recursive=True)
     fs.create_dir(f"{bucket}/output", recursive=True)
     fs.create_dir(f"{bucket}/models", recursive=True)
-    fs.create_dir(f"{bucket}/spark-upload", recursive=True)
+    fs.create_dir(f"{bucket}/ray-artifacts", recursive=True)
 
     for local_dir in required_lance_dirs:
         remote_prefix = f"{bucket}/sample/{local_dir.name}"

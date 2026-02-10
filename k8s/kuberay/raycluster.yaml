@@ -1,0 +1,54 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: raycluster-kaiyuan
+  namespace: kaiyuan-ray
+spec:
+  rayVersion: "2.51.2"
+  enableInTreeAutoscaling: true
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      num-cpus: "2"
+    template:
+      spec:
+        serviceAccountName: ray-job-runner
+        containers:
+          - name: ray-head
+            image: kaiyuan-ray-app:latest
+            imagePullPolicy: IfNotPresent
+            ports:
+              - containerPort: 6379
+                name: gcs
+              - containerPort: 8265
+                name: dashboard
+              - containerPort: 10001
+                name: client
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+  workerGroupSpecs:
+    - groupName: small-group
+      replicas: 2
+      minReplicas: 1
+      maxReplicas: 3
+      rayStartParams:
+        num-cpus: "2"
+      template:
+        spec:
+          serviceAccountName: ray-job-runner
+          containers:
+            - name: ray-worker
+              image: kaiyuan-ray-app:latest
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: "4Gi"
+                limits:
+                  cpu: "2"
+                  memory: "4Gi"

@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ray-pipeline-example
+  namespace: kaiyuan-ray
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: ray-job-runner
+      restartPolicy: Never
+      containers:
+        - name: ray-pipeline
+          image: kaiyuan-ray-app:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /workspace
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              python main.py \
+                --config example/read_write.yaml \
+                --mode k8s \
+                --ray-address ray://raycluster-kaiyuan-head-svc:10001

@@ -1,13 +1,14 @@
-KIND_CLUSTER_NAME ?= kaiyuan-spark
-K8S_NAMESPACE ?= kaiyuan-spark
-SPARK_K8S_IMAGE ?= kaiyuan-spark-app:latest
+KIND_CLUSTER_NAME ?= kaiyuan-ray
+K8S_NAMESPACE ?= kaiyuan-ray
+RAY_K8S_IMAGE ?= kaiyuan-ray-app:latest
 PIPELINE_CONFIG ?= example/read_write.yaml
-MINIO_BUCKET ?= kaiyuan-spark
+MINIO_BUCKET ?= kaiyuan-ray
 MINIO_NODE_ENDPOINT ?= host.docker.internal:30900
+RAY_ADDRESS ?= ray://raycluster-kaiyuan-head-svc:10001
+KUBERAY_OPERATOR_MANIFEST ?= https://raw.githubusercontent.com/ray-project/kuberay/v1.4.2/ray-operator/config/default/kuberay-operator.yaml
 
-.PHONY: build run run-examples up down logs shell spark-version prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
-	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down \
-	k8s-history-up k8s-history-down k8s-history-logs k8s-history-ui
+.PHONY: build run run-examples up down logs shell prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
+	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down
 
 build:
 	docker compose build app
@@ -28,9 +29,6 @@ logs:
 shell:
 	docker compose run --rm app bash
 
-spark-version:
-	docker compose run --rm --build app bash -lc 'if [ -n "$${JAVA_HOME:-}" ] && [ ! -x "$${JAVA_HOME}/bin/java" ]; then unset JAVA_HOME; fi; if [ -z "$${JAVA_HOME:-}" ]; then export JAVA_HOME="$$(dirname "$$(dirname "$$(readlink -f "$$(command -v java)")")")"; fi; spark-submit --version'
-
 prepare-sample:
 	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode synthetic --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
 
@@ -49,7 +47,8 @@ k8s-up:
 	@command -v kubectl >/dev/null 2>&1 || (echo "kubectl is required. Install: https://kubernetes.io/docs/tasks/tools/"; exit 2)
 	@kind get clusters | grep -qx "$(KIND_CLUSTER_NAME)" || kind create cluster --name "$(KIND_CLUSTER_NAME)" --config k8s/kind/cluster.yaml
 	docker compose build app
-	kind load docker-image "$(SPARK_K8S_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+	kind load docker-image "$(RAY_K8S_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+	kubectl apply -f $(KUBERAY_OPERATOR_MANIFEST)
 	kubectl apply -f k8s/base/namespace.yaml
 	kubectl apply -f k8s/base/rbac.yaml
 	kubectl apply -f k8s/base/minio.yaml
@@ -57,9 +56,8 @@ k8s-up:
 	kubectl -n "$(K8S_NAMESPACE)" delete -f k8s/base/minio-init-job.yaml --ignore-not-found
 	kubectl apply -f k8s/base/minio-init-job.yaml
 	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=complete job/minio-init --timeout=180s
-	kubectl apply -f k8s/base/history-server.yaml
-	kubectl -n "$(K8S_NAMESPACE)" set image deployment/spark-history-server spark-history-server="$${SPARK_K8S_IMAGE:-$(SPARK_K8S_IMAGE)}"
-	kubectl -n "$(K8S_NAMESPACE)" rollout status deployment/spark-history-server --timeout=180s
+	kubectl apply -f k8s/kuberay/raycluster.yaml
+	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=ready pod -l ray.io/node-type=head --timeout=300s
 
 k8s-prepare: prepare-examples
 	docker compose run --rm --build app python script/sync_assets_to_minio.py \
@@ -71,32 +69,18 @@ k8s-prepare: prepare-examples
 
 k8s-run:
 	K8S_NAMESPACE=$${K8S_NAMESPACE:-$(K8S_NAMESPACE)} \
-	SPARK_K8S_IMAGE=$${SPARK_K8S_IMAGE:-$(SPARK_K8S_IMAGE)} \
-	MINIO_BUCKET=$${MINIO_BUCKET:-$(MINIO_BUCKET)} \
+	RAY_JOB_IMAGE=$${RAY_JOB_IMAGE:-$(RAY_K8S_IMAGE)} \
+	RAY_ADDRESS=$${RAY_ADDRESS:-$(RAY_ADDRESS)} \
 	bash script/run_k8s.sh main.py "$${PIPELINE_CONFIG:-$(PIPELINE_CONFIG)}"
 
 k8s-run-examples:
 	K8S_NAMESPACE=$${K8S_NAMESPACE:-$(K8S_NAMESPACE)} \
-	SPARK_K8S_IMAGE=$${SPARK_K8S_IMAGE:-$(SPARK_K8S_IMAGE)} \
-	MINIO_BUCKET=$${MINIO_BUCKET:-$(MINIO_BUCKET)} \
+	RAY_JOB_IMAGE=$${RAY_JOB_IMAGE:-$(RAY_K8S_IMAGE)} \
+	RAY_ADDRESS=$${RAY_ADDRESS:-$(RAY_ADDRESS)} \
 	bash script/run_all_examples_k8s.sh example
 
 k8s-logs:
 	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" get pods
-
-k8s-history-up:
-	kubectl apply -f k8s/base/history-server.yaml
-	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" set image deployment/spark-history-server spark-history-server="$${SPARK_K8S_IMAGE:-$(SPARK_K8S_IMAGE)}"
-	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" rollout status deployment/spark-history-server --timeout=180s
-
-k8s-history-down:
-	kubectl delete -f k8s/base/history-server.yaml --ignore-not-found
-
-k8s-history-logs:
-	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" logs deployment/spark-history-server --tail=200 -f
-
-k8s-history-ui:
-	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" port-forward svc/spark-history-server 18080:18080
 
 k8s-down:
 	@if kind get clusters | grep -qx "$(KIND_CLUSTER_NAME)"; then kind delete cluster --name "$(KIND_CLUSTER_NAME)"; else echo "kind cluster '$(KIND_CLUSTER_NAME)' does not exist"; fi
