@@ -3,6 +3,8 @@ kind: RayCluster
 metadata:
   name: raycluster-kaiyuan
   namespace: kaiyuan-ray
+  labels:
+    ray.io/cluster: raycluster-kaiyuan
 spec:
   rayVersion: "2.51.2"
   enableInTreeAutoscaling: true

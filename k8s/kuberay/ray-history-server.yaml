@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ray-history-server
+  namespace: kaiyuan-ray
+  labels:
+    app: ray-history-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ray-history-server
+  template:
+    metadata:
+      labels:
+        app: ray-history-server
+    spec:
+      serviceAccountName: ray-job-runner
+      containers:
+        - name: ray-history-server
+          image: kaiyuan-ray-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              python /workspace/script/ray_history_server.py
+          env:
+            - name: K8S_NAMESPACE
+              value: kaiyuan-ray
+            - name: HISTORY_SERVER_PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-history-server
+  namespace: kaiyuan-ray
+  labels:
+    app: ray-history-server
+spec:
+  type: NodePort
+  selector:
+    app: ray-history-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080

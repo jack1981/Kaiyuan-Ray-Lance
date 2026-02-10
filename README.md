@@ -10,9 +10,10 @@ A tree-structured data preprocessing framework migrated from Spark to Ray Data w
 This branch removes Spark/Yarn runtime paths and replaces them with:
 
 - Ray local mode (`ray.init()` on developer laptop / Docker)
-- Ray Kubernetes mode (KubeRay `RayCluster` + Kubernetes Job submit)
+- Ray Kubernetes mode (KubeRay `RayCluster` + `RayJob` submit)
 - Ray-native transforms (`map_batches`, `random_shuffle`, dataset-level operations)
 - Lance I/O through Ray Data (`read_lance`, `write_lance`)
+- Persistent job history UI service for completed `RayJob` records
 
 ## Spark to Ray Mapping
 
@@ -22,7 +23,7 @@ This branch removes Spark/Yarn runtime paths and replaces them with:
 | Spark DataFrame nodes | Ray Data `Dataset` nodes |
 | Spark UDF / pandas UDF | `Dataset.map_batches` |
 | `spark-submit` local mode | `python main.py --mode local` |
-| Spark-on-K8s submit | Kubernetes Job + `--mode k8s --ray-address` |
+| Spark-on-K8s submit | KubeRay `RayJob` + `--mode k8s --ray-address` |
 | Spark Lance catalog | Ray Data `read_lance` / `write_lance` |
 | Legacy non-Ray cluster mode | Removed |
 
@@ -89,7 +90,7 @@ This applies:
 make k8s-prepare
 ```
 
-### 3) Submit pipeline to cluster
+### 3) Submit pipeline to cluster (as RayJob, retained for history)
 
 ```bash
 make k8s-run
@@ -110,7 +111,31 @@ bash script/run_k8s.sh main.py example/read_write.yaml
 make k8s-run-examples
 ```
 
-### 5) Tear down kind cluster
+### 5) Open Ray UI + History UI
+
+```bash
+make k8s-ui
+```
+
+- Ray Dashboard: `http://localhost:30265`
+- Ray Job History UI: `http://localhost:30080`
+
+Optional port-forward mode:
+
+```bash
+make k8s-dashboard-port-forward
+make k8s-history-port-forward
+```
+
+### 6) Check historical job status
+
+```bash
+make k8s-history
+```
+
+`script/run_k8s.sh` submits a `RayJob` CR and keeps it by default, so completed/failed jobs remain visible in history.
+
+### 7) Tear down kind cluster
 
 ```bash
 make k8s-down
@@ -125,10 +150,10 @@ ray:
   app_name: read_write
 pipeline:
   type: LanceWriter
-  output_path: /data/output/read_write.lance
+  output_path: data/output/read_write.lance
   child_configs:
     - type: LanceReader
-      input_path: "/data/sample/pcmind_kaiyuan_2b_sample.lance"
+      input_path: "data/sample/pcmind_kaiyuan_2b_sample.lance"
 ```
 
 ## Lance I/O Notes
@@ -155,6 +180,12 @@ pipeline:
 - Ray address connection failures:
   - Verify Ray head service is reachable: `ray://raycluster-kaiyuan-head-svc:10001`
   - Check cluster pods: `kubectl -n kaiyuan-ray get pods`
+- Ray Dashboard/UI unavailable:
+  - Check services: `kubectl -n kaiyuan-ray get svc ray-dashboard ray-history-server`
+  - Use port-forward fallback: `make k8s-dashboard-port-forward` and `make k8s-history-port-forward`
+- History table is empty:
+  - Verify RayJob resources exist: `kubectl -n kaiyuan-ray get rayjobs`
+  - Run a job: `make k8s-run`
 - Image pull failures on kind:
   - Re-load local image: `kind load docker-image kaiyuan-ray-app:latest --name kaiyuan-ray`
 - Kubernetes permission errors:

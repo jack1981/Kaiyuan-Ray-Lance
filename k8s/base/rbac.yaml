@@ -24,6 +24,11 @@ rules:
     resources:
       - jobs
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["ray.io"]
+    resources:
+      - rayjobs
+      - rayclusters
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

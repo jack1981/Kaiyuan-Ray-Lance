@@ -1,23 +1,21 @@
-apiVersion: batch/v1
-kind: Job
+apiVersion: ray.io/v1
+kind: RayJob
 metadata:
   name: ray-pipeline-example
   namespace: kaiyuan-ray
 spec:
-  backoffLimit: 0
-  template:
+  entrypoint: |
+    python /workspace/main.py --config /workspace/example/read_write.yaml --mode k8s --ray-address ray://raycluster-kaiyuan-head-svc:10001
+  submissionMode: K8sJobMode
+  clusterSelector:
+    ray.io/cluster: raycluster-kaiyuan
+  shutdownAfterJobFinishes: false
+  deletionPolicy: DeleteNone
+  ttlSecondsAfterFinished: 0
+  submitterPodTemplate:
     spec:
       serviceAccountName: ray-job-runner
-      restartPolicy: Never
       containers:
-        - name: ray-pipeline
+        - name: submitter
           image: kaiyuan-ray-app:latest
           imagePullPolicy: IfNotPresent
-          workingDir: /workspace
-          command: ["/bin/bash", "-lc"]
-          args:
-            - |
-              python main.py \
-                --config example/read_write.yaml \
-                --mode k8s \
-                --ray-address ray://raycluster-kaiyuan-head-svc:10001

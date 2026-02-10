@@ -8,7 +8,7 @@ RAY_ADDRESS ?= ray://raycluster-kaiyuan-head-svc:10001
 KUBERAY_OPERATOR_MANIFEST ?= https://raw.githubusercontent.com/ray-project/kuberay/v1.4.2/ray-operator/config/default/kuberay-operator.yaml
 
 .PHONY: build run run-examples up down logs shell prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
-	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down
+	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down k8s-ui k8s-history k8s-dashboard-port-forward k8s-history-port-forward
 
 build:
 	docker compose build app
@@ -57,7 +57,10 @@ k8s-up:
 	kubectl apply -f k8s/base/minio-init-job.yaml
 	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=complete job/minio-init --timeout=180s
 	kubectl apply -f k8s/kuberay/raycluster.yaml
+	kubectl apply -f k8s/kuberay/ray-dashboard-service.yaml
+	kubectl apply -f k8s/kuberay/ray-history-server.yaml
 	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=ready pod -l ray.io/node-type=head --timeout=300s
+	kubectl -n "$(K8S_NAMESPACE)" rollout status deployment/ray-history-server --timeout=180s
 
 k8s-prepare: prepare-examples
 	docker compose run --rm --build app python script/sync_assets_to_minio.py \
@@ -81,6 +84,19 @@ k8s-run-examples:
 
 k8s-logs:
 	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" get pods
+
+k8s-ui:
+	@echo "Ray Dashboard UI: http://localhost:30265"
+	@echo "Ray Job History UI: http://localhost:30080"
+
+k8s-history:
+	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" get rayjobs -o wide
+
+k8s-dashboard-port-forward:
+	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" port-forward svc/ray-dashboard 8265:8265
+
+k8s-history-port-forward:
+	kubectl -n "$${K8S_NAMESPACE:-$(K8S_NAMESPACE)}" port-forward svc/ray-history-server 8080:8080
 
 k8s-down:
 	@if kind get clusters | grep -qx "$(KIND_CLUSTER_NAME)"; then kind delete cluster --name "$(KIND_CLUSTER_NAME)"; else echo "kind cluster '$(KIND_CLUSTER_NAME)' does not exist"; fi
