@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
+from urllib.parse import urlparse
 
 import pandas as pd
 import ray
@@ -249,8 +250,21 @@ def default_storage_options(explicit: dict | None = None) -> dict | None:
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("MINIO_SECRET_KEY")
     region = os.getenv("AWS_REGION") or os.getenv("MINIO_REGION")
     allow_http = os.getenv("LANCE_AWS_ALLOW_HTTP")
+    allow_http_flag: bool | None = None
+    if allow_http is not None:
+        allow_http_flag = str(allow_http).lower() in {"1", "true", "yes"}
 
-    if not any([endpoint, access_key, secret_key, region, allow_http]):
+    if endpoint and "://" in endpoint:
+        parsed = urlparse(endpoint)
+        if allow_http_flag is None and parsed.scheme:
+            allow_http_flag = parsed.scheme.lower() == "http"
+    elif endpoint:
+        if allow_http_flag is None:
+            # MinIO-style endpoints are commonly provided without a scheme.
+            allow_http_flag = True
+        endpoint = f"{'http' if allow_http_flag else 'https'}://{endpoint}"
+
+    if not any([endpoint, access_key, secret_key, region, allow_http_flag is not None]):
         return None
 
     options = {}
@@ -262,8 +276,8 @@ def default_storage_options(explicit: dict | None = None) -> dict | None:
         options["aws_secret_access_key"] = secret_key
     if region:
         options["aws_region"] = region
-    if allow_http is not None:
-        options["aws_allow_http"] = allow_http.lower() in {"1", "true", "yes"}
+    if allow_http_flag is not None:
+        options["aws_allow_http"] = "true" if allow_http_flag else "false"
     return options
 
 

@@ -5,17 +5,38 @@ metadata:
   namespace: kaiyuan-ray
 spec:
   entrypoint: |
-    python /workspace/main.py --config /workspace/example/read_write.yaml --mode k8s --ray-address ray://raycluster-kaiyuan-head-svc:10001
+    K8S_DATA_BUCKET=kaiyuan-ray MINIO_BUCKET=kaiyuan-ray MINIO_ENDPOINT=minio.kaiyuan-ray.svc.cluster.local:9000 MINIO_ACCESS_KEY=minio MINIO_SECRET_KEY=minio123 AWS_ENDPOINT_URL=http://minio.kaiyuan-ray.svc.cluster.local:9000 AWS_ACCESS_KEY_ID=minio AWS_SECRET_ACCESS_KEY=minio123 AWS_REGION=us-east-1 LANCE_AWS_ALLOW_HTTP=1 python /workspace/main.py --config /workspace/example/read_write.yaml --mode k8s --ray-address auto
   submissionMode: K8sJobMode
   clusterSelector:
     ray.io/cluster: raycluster-kaiyuan
   shutdownAfterJobFinishes: false
-  deletionPolicy: DeleteNone
   ttlSecondsAfterFinished: 0
   submitterPodTemplate:
     spec:
+      restartPolicy: Never
       serviceAccountName: ray-job-runner
       containers:
         - name: submitter
           image: kaiyuan-ray-app:latest
           imagePullPolicy: IfNotPresent
+          env:
+            - name: K8S_DATA_BUCKET
+              value: kaiyuan-ray
+            - name: MINIO_BUCKET
+              value: kaiyuan-ray
+            - name: MINIO_ENDPOINT
+              value: minio.kaiyuan-ray.svc.cluster.local:9000
+            - name: MINIO_ACCESS_KEY
+              value: minio
+            - name: MINIO_SECRET_KEY
+              value: minio123
+            - name: AWS_ENDPOINT_URL
+              value: http://minio.kaiyuan-ray.svc.cluster.local:9000
+            - name: AWS_ACCESS_KEY_ID
+              value: minio
+            - name: AWS_SECRET_ACCESS_KEY
+              value: minio123
+            - name: AWS_REGION
+              value: us-east-1
+            - name: LANCE_AWS_ALLOW_HTTP
+              value: "1"

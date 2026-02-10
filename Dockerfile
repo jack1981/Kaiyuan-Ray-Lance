@@ -18,6 +18,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      wget \
       tini; \
     rm -rf /var/lib/apt/lists/*
 

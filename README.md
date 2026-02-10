@@ -48,7 +48,7 @@ python main.py --config <config.yaml> --mode local|k8s [--ray-address ray://...]
 ```
 
 - `--mode local`: starts a local Ray runtime if no address is supplied.
-- `--mode k8s`: connects to a remote Ray cluster using `--ray-address`, `ray.address` config, `RAY_ADDRESS`, or default `ray://raycluster-kaiyuan-head-svc:10001`.
+- `--mode k8s`: connects to a Ray cluster using `--ray-address`, `ray.address` config, `RAY_ADDRESS`, or default `auto` (recommended for RayJob-in-cluster execution).
 - `--debug-stats`: enables stage-level timing and `ds.stats()` logs (same as setting `ray.debug_stats: true` in YAML).
 
 ## Local Run (Laptop / Docker)
@@ -122,7 +122,7 @@ Equivalent direct submit:
 ```bash
 K8S_NAMESPACE=kaiyuan-ray \
 RAY_JOB_IMAGE=kaiyuan-ray-app:latest \
-RAY_ADDRESS=ray://raycluster-kaiyuan-head-svc:10001 \
+RAY_ADDRESS=auto \
 bash script/run_k8s.sh main.py example/read_write.yaml
 ```
 
@@ -240,7 +240,8 @@ pipeline:
 ## Troubleshooting
 
 - Ray address connection failures:
-  - Verify Ray head service is reachable: `ray://raycluster-kaiyuan-head-svc:10001`
+  - In-cluster RayJob mode should use `RAY_ADDRESS=auto`.
+  - For external clients, verify Ray head service reachability: `ray://raycluster-kaiyuan-head-svc:10001`.
   - Check cluster pods: `kubectl -n kaiyuan-ray get pods`
 - Ray Dashboard/UI unavailable:
   - Check services: `kubectl -n kaiyuan-ray get svc ray-dashboard ray-history-server`

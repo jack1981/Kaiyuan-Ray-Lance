@@ -1,4 +1,4 @@
-ray[data]==2.51.2
+ray[default,data]==2.51.2
 pylance==1.0.4
 transformers==4.48.0
 fasttext==0.9.3

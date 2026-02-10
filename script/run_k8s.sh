@@ -52,16 +52,27 @@ NAMESPACE=${K8S_NAMESPACE:-kaiyuan-ray}
 SERVICE_ACCOUNT=${K8S_SERVICE_ACCOUNT:-ray-job-runner}
 RAY_JOB_IMAGE=${RAY_JOB_IMAGE:-kaiyuan-ray-app:latest}
 RAY_JOB_IMAGE_PULL_POLICY=${RAY_JOB_IMAGE_PULL_POLICY:-IfNotPresent}
-RAY_ADDRESS=${RAY_ADDRESS:-ray://raycluster-kaiyuan-head-svc:10001}
+RAY_ADDRESS=${RAY_ADDRESS:-auto}
 RAY_CLUSTER_SELECTOR_KEY=${RAY_CLUSTER_SELECTOR_KEY:-ray.io/cluster}
 RAY_CLUSTER_SELECTOR_VALUE=${RAY_CLUSTER_SELECTOR_VALUE:-raycluster-kaiyuan}
 RAYJOB_SUBMISSION_MODE=${RAYJOB_SUBMISSION_MODE:-K8sJobMode}
-RAYJOB_DELETION_POLICY=${RAYJOB_DELETION_POLICY:-DeleteNone}
+RAYJOB_DELETION_POLICY=${RAYJOB_DELETION_POLICY:-}
 RAYJOB_TTL_SECONDS=${RAYJOB_TTL_SECONDS:-0}
 RAYJOB_SHUTDOWN_AFTER_FINISH=${RAYJOB_SHUTDOWN_AFTER_FINISH:-false}
 WAIT_TIMEOUT_SECONDS=${K8S_WAIT_TIMEOUT_SECONDS:-3600}
 POLL_INTERVAL_SECONDS=${K8S_POLL_INTERVAL_SECONDS:-5}
 DELETE_RAYJOB=${K8S_DELETE_RAYJOB:-0}
+MAIN_EXTRA_ARGS=${MAIN_EXTRA_ARGS:-}
+K8S_DATA_BUCKET=${K8S_DATA_BUCKET:-${MINIO_BUCKET:-kaiyuan-ray}}
+MINIO_BUCKET=${MINIO_BUCKET:-${K8S_DATA_BUCKET}}
+MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio.${NAMESPACE}.svc.cluster.local:9000}
+AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://${MINIO_ENDPOINT}}
+MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-${AWS_ACCESS_KEY_ID:-minio}}
+MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-${AWS_SECRET_ACCESS_KEY:-minio123}}
+AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-${MINIO_ACCESS_KEY}}
+AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-${MINIO_SECRET_KEY}}
+AWS_REGION=${AWS_REGION:-us-east-1}
+LANCE_AWS_ALLOW_HTTP=${LANCE_AWS_ALLOW_HTTP:-1}
 
 raw_job_name=${K8S_RAYJOB_NAME:-rayjob-$(date +%s)-$RANDOM}
 JOB_NAME=$(echo "${raw_job_name}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')
@@ -78,6 +89,11 @@ echo "Submitting RayJob '${JOB_NAME}' in namespace '${NAMESPACE}'"
 
 kubectl -n "${NAMESPACE}" delete rayjob "${JOB_NAME}" --ignore-not-found >/dev/null 2>&1 || true
 
+deletion_policy_line=""
+if [ -n "${RAYJOB_DELETION_POLICY}" ]; then
+  deletion_policy_line="  deletionPolicy: ${RAYJOB_DELETION_POLICY}"
+fi
+
 cat <<EOF_YAML | kubectl apply -f -
 apiVersion: ray.io/v1
 kind: RayJob
@@ -88,20 +104,42 @@ metadata:
     app.kubernetes.io/name: kaiyuan-ray-pipeline
 spec:
   entrypoint: |
-    python ${script_in_container} --config ${config_in_container} --mode k8s --ray-address ${RAY_ADDRESS}
+    K8S_DATA_BUCKET=${K8S_DATA_BUCKET} MINIO_BUCKET=${MINIO_BUCKET} MINIO_ENDPOINT=${MINIO_ENDPOINT} MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY} MINIO_SECRET_KEY=${MINIO_SECRET_KEY} AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL} AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} AWS_REGION=${AWS_REGION} LANCE_AWS_ALLOW_HTTP=${LANCE_AWS_ALLOW_HTTP} python ${script_in_container} --config ${config_in_container} --mode k8s --ray-address ${RAY_ADDRESS} ${MAIN_EXTRA_ARGS}
   submissionMode: ${RAYJOB_SUBMISSION_MODE}
   clusterSelector:
     ${RAY_CLUSTER_SELECTOR_KEY}: ${RAY_CLUSTER_SELECTOR_VALUE}
   shutdownAfterJobFinishes: ${RAYJOB_SHUTDOWN_AFTER_FINISH}
-  deletionPolicy: ${RAYJOB_DELETION_POLICY}
+${deletion_policy_line}
   ttlSecondsAfterFinished: ${RAYJOB_TTL_SECONDS}
   submitterPodTemplate:
     spec:
+      restartPolicy: Never
       serviceAccountName: ${SERVICE_ACCOUNT}
       containers:
         - name: submitter
           image: ${RAY_JOB_IMAGE}
           imagePullPolicy: ${RAY_JOB_IMAGE_PULL_POLICY}
+          env:
+            - name: K8S_DATA_BUCKET
+              value: "${K8S_DATA_BUCKET}"
+            - name: MINIO_BUCKET
+              value: "${MINIO_BUCKET}"
+            - name: MINIO_ENDPOINT
+              value: "${MINIO_ENDPOINT}"
+            - name: MINIO_ACCESS_KEY
+              value: "${MINIO_ACCESS_KEY}"
+            - name: MINIO_SECRET_KEY
+              value: "${MINIO_SECRET_KEY}"
+            - name: AWS_ENDPOINT_URL
+              value: "${AWS_ENDPOINT_URL}"
+            - name: AWS_ACCESS_KEY_ID
+              value: "${AWS_ACCESS_KEY_ID}"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "${AWS_SECRET_ACCESS_KEY}"
+            - name: AWS_REGION
+              value: "${AWS_REGION}"
+            - name: LANCE_AWS_ALLOW_HTTP
+              value: "${LANCE_AWS_ALLOW_HTTP}"
 EOF_YAML
 
 start_ts=$(date +%s)

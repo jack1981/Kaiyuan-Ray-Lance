@@ -63,7 +63,7 @@ class PipelineTree:
                 ray_address
                 or configured_address
                 or os.getenv("RAY_ADDRESS")
-                or "ray://raycluster-kaiyuan-head-svc:10001"
+                or "auto"
             )
         else:
             effective_address = ray_address or configured_address
@@ -95,6 +95,13 @@ class PipelineTree:
             debug_stats=debug_stats,
             data=data_config,
         )
+        if self.runtime.debug_stats:
+            print(
+                "[RayDebug] runtime "
+                f"mode={self.runtime.mode} "
+                f"ray_address={self.runtime.ray_address} "
+                f"storage_options={self.runtime.storage_options}"
+            )
 
         pipeline_config = copy.deepcopy(config["pipeline"])
         class_type = pipeline_config.pop("type")

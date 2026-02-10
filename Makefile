@@ -4,8 +4,8 @@ RAY_K8S_IMAGE ?= kaiyuan-ray-app:latest
 PIPELINE_CONFIG ?= example/read_write.yaml
 MINIO_BUCKET ?= kaiyuan-ray
 MINIO_NODE_ENDPOINT ?= host.docker.internal:30900
-RAY_ADDRESS ?= ray://raycluster-kaiyuan-head-svc:10001
-KUBERAY_OPERATOR_MANIFEST ?= https://raw.githubusercontent.com/ray-project/kuberay/v1.4.2/ray-operator/config/default/kuberay-operator.yaml
+RAY_ADDRESS ?= auto
+KUBERAY_OPERATOR_KUSTOMIZE ?= github.com/ray-project/kuberay/ray-operator/config/default?ref=v1.4.2
 
 .PHONY: build run run-examples bench up down logs shell prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
 	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down k8s-ui k8s-history k8s-dashboard-port-forward k8s-history-port-forward
@@ -51,7 +51,7 @@ k8s-up:
 	@kind get clusters | grep -qx "$(KIND_CLUSTER_NAME)" || kind create cluster --name "$(KIND_CLUSTER_NAME)" --config k8s/kind/cluster.yaml
 	docker compose build app
 	kind load docker-image "$(RAY_K8S_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
-	kubectl apply -f $(KUBERAY_OPERATOR_MANIFEST)
+	kubectl apply --server-side -k "$(KUBERAY_OPERATOR_KUSTOMIZE)"
 	kubectl apply -f k8s/base/namespace.yaml
 	kubectl apply -f k8s/base/rbac.yaml
 	kubectl apply -f k8s/base/minio.yaml
@@ -62,7 +62,7 @@ k8s-up:
 	kubectl apply -f k8s/kuberay/raycluster.yaml
 	kubectl apply -f k8s/kuberay/ray-dashboard-service.yaml
 	kubectl apply -f k8s/kuberay/ray-history-server.yaml
-	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=ready pod -l ray.io/node-type=head --timeout=300s
+	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=HeadPodReady raycluster/raycluster-kaiyuan --timeout=300s
 	kubectl -n "$(K8S_NAMESPACE)" rollout status deployment/ray-history-server --timeout=180s
 
 k8s-prepare: prepare-examples
