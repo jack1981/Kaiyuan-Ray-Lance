@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+spec:
+  restartPolicy: Never
+  containers:
+    - name: spark-kubernetes-executor
+      env:
+        - name: PYSPARK_PYTHON
+          value: python
+        - name: PYSPARK_DRIVER_PYTHON
+          value: python

@@ -1,5 +1,6 @@
 services:
   app:
+    image: kaiyuan-spark-app:latest
     build:
       context: .
     working_dir: /workspace

@@ -12,9 +12,45 @@ from pyspark.sql.types import *
 
 
 def _as_lance_identifier(path: str) -> str:
+    if path.startswith("s3a://"):
+        path = "s3://" + path[len("s3a://") :]
     if path.startswith("lance."):
         return path
     return f"lance.`{path.replace('`', '``')}`"
+
+
+def _normalize_lance_path(path: str) -> str:
+    normalized = path
+    if path.startswith("lance.`") and path.endswith("`"):
+        normalized = path[len("lance.`") : -1].replace("``", "`")
+    elif path.startswith("lance."):
+        normalized = path[len("lance.") :]
+
+    if normalized.startswith("s3a://"):
+        normalized = "s3://" + normalized[len("s3a://") :]
+
+    return normalized
+
+
+def _is_unsupported_lance_direct_query(exc: Exception) -> bool:
+    message = str(exc)
+    return (
+        "UNSUPPORTED_DATASOURCE_FOR_DIRECT_QUERY" in message
+        and "lance" in message.lower()
+    )
+
+
+def _read_lance_table(spark: SparkSession, reader, path: str) -> DataFrame:
+    try:
+        return spark.table(_as_lance_identifier(path))
+    except Exception as exc:
+        if not _is_unsupported_lance_direct_query(exc):
+            raise
+        return (
+            reader.format("lance")
+            .option("path", _normalize_lance_path(path))
+            .load()
+        )
 
 
 def parse_spark_type(field):
@@ -119,18 +155,18 @@ class LanceReader(DataReader):
 
     def _read_one(self, path: str, reader) -> DataFrame:
         if self.input_format == "lance":
-            return self.spark.table(_as_lance_identifier(path))
+            return _read_lance_table(self.spark, reader, path)
         if self.input_format == "parquet":
             return reader.parquet(path)
 
         if self._looks_like_lance_path(path):
-            return self.spark.table(_as_lance_identifier(path))
+            return _read_lance_table(self.spark, reader, path)
         if self._looks_like_parquet_path(path):
             return reader.parquet(path)
 
         # Auto mode: prefer Lance, fall back to parquet for legacy datasets.
         try:
-            return self.spark.table(_as_lance_identifier(path))
+            return _read_lance_table(self.spark, reader, path)
         except Exception as lance_exc:
             try:
                 return reader.parquet(path)
@@ -203,17 +239,17 @@ class LanceReaderZstd(DataReader):
 
     def _read_one(self, path: str, reader) -> DataFrame:
         if self.input_format == "lance":
-            return self.spark.table(_as_lance_identifier(path))
+            return _read_lance_table(self.spark, reader, path)
         if self.input_format == "parquet":
             return reader.parquet(path)
 
         if self._looks_like_lance_path(path):
-            return self.spark.table(_as_lance_identifier(path))
+            return _read_lance_table(self.spark, reader, path)
         if self._looks_like_parquet_path(path):
             return reader.parquet(path)
 
         try:
-            return self.spark.table(_as_lance_identifier(path))
+            return _read_lance_table(self.spark, reader, path)
         except Exception as lance_exc:
             try:
                 return reader.parquet(path)

@@ -45,24 +45,23 @@ This basic pipeline demonstrates reading data and writing results through the co
 
 _Note: We do not provide any dataset in this repository. You need to acquire the datasets according to their names._
 
-## Docker (Local Mode Only)
+## Docker + Kubernetes (Local Laptop)
 
-This Docker setup is intended for **Spark local mode** only and pins Spark to **3.5.8**. The local pipeline runs on **Lance format** via `lance-spark`.
+The project image is pinned to Spark `3.5.8` and `lance-spark` integration.
 
-Key local runtime behaviors:
+This branch supports:
 
-- Spark session loads Lance catalog/extensions through `script/run_local.sh`.
-- Sample preparation writes `.lance` datasets and lightweight local model assets.
-- `make run-examples` validates all `example/*.yaml` pipelines against local Lance data.
+- Docker local mode (`master=local[*]`)
+- Spark-on-Kubernetes cluster mode on a local kind cluster (1 driver + 2 executors by default)
 
-For YARN/cluster usage, continue to use `script/run_yarn.sh` outside Docker.
+For YARN usage, continue to use `script/run_yarn.sh` outside Docker/K8s.
 
-### Build
+### Build Base Image
 ```bash
 make build
 ```
 
-### Prepare Small Local Sample (from Hugging Face)
+### Prepare Local Lance Sample + Models
 ```bash
 make prepare-sample
 ```
@@ -83,7 +82,7 @@ make run
 make run-examples
 ```
 
-### Run (Custom Config)
+### Run Local (Custom Config)
 ```bash
 PIPELINE_CONFIG=/workspace/<path>.yaml make run
 ```
@@ -107,6 +106,80 @@ Check Spark version in container:
 ```bash
 make spark-version
 ```
+
+### Kubernetes Cluster Mode (kind on macOS)
+
+Boot local Kubernetes, deploy MinIO, and load the Spark image:
+```bash
+make k8s-up
+```
+
+Prepare and upload all example assets (`.lance` + model files) to MinIO:
+```bash
+make k8s-prepare
+```
+
+Run the default example in Spark-on-K8s cluster mode:
+```bash
+make k8s-run
+```
+
+Run all examples in Spark-on-K8s cluster mode:
+```bash
+make k8s-run-examples
+```
+
+Deploy/refresh Spark History Server (for completed application UIs):
+```bash
+make k8s-history-up
+```
+
+Open Spark History Server UI locally:
+```bash
+make k8s-history-ui
+```
+Then visit `http://localhost:18080`.
+
+### Cluster UI Access
+
+Kubernetes Dashboard (cluster nodes, pods, jobs):
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+kubectl apply -f k8s/base/dashboard-admin.yaml
+kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 10443:443
+```
+In another terminal, generate a login token:
+```bash
+kubectl -n kubernetes-dashboard create token admin-user --duration=24h
+```
+Open `https://localhost:10443` and sign in with the token.
+
+If Dashboard looks empty, switch namespace to `kaiyuan-spark` (or `All namespaces`).
+
+Spark live UI (running application):
+```bash
+bash script/run_k8s.sh main.py example/read_write.yaml
+```
+In another terminal:
+```bash
+svc=$(kubectl -n kaiyuan-spark get svc -o name | rg 'driver-svc' | tail -n1)
+kubectl -n kaiyuan-spark port-forward "${svc}" 4040:4040
+```
+Open `http://localhost:4040`.
+
+Delete local kind cluster:
+```bash
+make k8s-down
+```
+
+K8s notes:
+
+- The same Docker image is used by submitter, driver, and executors.
+- Default cluster simulation is `1` driver pod and `2` executor pods (`K8S_EXECUTOR_INSTANCES=2`).
+- Example YAMLs are rewritten at submit time from `/data/sample/*.lance` and `/data/output/*.lance` to `s3a://<bucket>/sample/*.lance` and `s3a://<bucket>/output/*.lance`.
+- FastText and sequence-classifier model assets are distributed via Spark `--files` and `--archives`.
+- Spark event logs are enabled by default in K8s mode (`s3a://<bucket>/spark-events`) so finished apps appear in Spark History Server.
+- For migration to a real K8s cluster, replace image/pull policy/storage endpoint env vars in `.env` and reuse `script/run_k8s.sh`.
 
 ## Framework Architecture
 

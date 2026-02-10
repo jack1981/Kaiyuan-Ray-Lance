@@ -8,6 +8,8 @@ from datafiner.register import register
 
 
 def _as_lance_identifier(path: str) -> str:
+    if path.startswith("s3a://"):
+        path = "s3://" + path[len("s3a://") :]
     if path.startswith("lance."):
         return path
     return f"lance.`{path.replace('`', '``')}`"
@@ -274,4 +276,3 @@ class LanceWriterZstd(DataWriter):
             writer_v2.using("lance").create()
 
         return df
-

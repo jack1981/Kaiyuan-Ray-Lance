@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: kaiyuan-spark
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+          envFrom:
+            - secretRef:
+                name: minio-credentials
+          command:
+            - /bin/sh
+            - -lc
+            - |
+              set -eu
+              for i in $(seq 1 60); do
+                if mc alias set local http://minio.kaiyuan-spark.svc.cluster.local:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; then
+                  break
+                fi
+                sleep 2
+              done
+              mc mb -p local/kaiyuan-spark || true
+              mc mb -p local/kaiyuan-spark/spark-upload || true
+              mc mb -p local/kaiyuan-spark/sample || true
+              mc mb -p local/kaiyuan-spark/output || true
+              mc mb -p local/kaiyuan-spark/models || true
+              printf '' | mc pipe local/kaiyuan-spark/spark-events/.keep || true

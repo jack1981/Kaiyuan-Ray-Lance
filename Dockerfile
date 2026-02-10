@@ -14,6 +14,8 @@ ARG SPARK_VERSION=3.5.8
 ARG LANCE_SPARK_VERSION=0.0.15
 ARG LANCE_SPARK_ARTIFACT=lance-spark-bundle-3.5_2.12-${LANCE_SPARK_VERSION}.jar
 ARG LANCE_SPARK_BASE_URL=
+ARG HADOOP_AWS_VERSION=3.3.4
+ARG AWS_SDK_BUNDLE_VERSION=1.12.262
 
 ENV SPARK_HOME=/opt/spark \
     PATH=/opt/spark/bin:$PATH \
@@ -42,6 +44,24 @@ RUN set -eux; \
       echo "Unable to locate spark-submit under ${SPARK_HOME}" >&2; \
       exit 1; \
     fi; \
+    aws_ok=0; \
+    for m in \
+      "https://repo1.maven.org/maven2" \
+      "https://repo.maven.apache.org/maven2"; do \
+      if curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+        "${m}/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" \
+        -o "${SPARK_HOME}/jars/hadoop-aws-${HADOOP_AWS_VERSION}.jar" \
+        && curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+        "${m}/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_BUNDLE_VERSION}/aws-java-sdk-bundle-${AWS_SDK_BUNDLE_VERSION}.jar" \
+        -o "${SPARK_HOME}/jars/aws-java-sdk-bundle-${AWS_SDK_BUNDLE_VERSION}.jar"; then \
+        aws_ok=1; \
+        break; \
+      fi; \
+    done; \
+    if [ "${aws_ok}" != "1" ]; then \
+      echo "Unable to download hadoop-aws and aws-java-sdk-bundle jars from Maven mirrors." >&2; \
+      exit 1; \
+    fi; \
     lance_ok=0; \
     for m in \
       "${LANCE_SPARK_BASE_URL}" \
@@ -61,7 +81,11 @@ RUN set -eux; \
 RUN useradd -ms /bin/bash app
 WORKDIR /workspace
 COPY . /workspace
-RUN chown -R app:app /workspace
+RUN cp /workspace/script/spark_k8s_entrypoint.sh /opt/entrypoint.sh \
+    && chmod 0755 /opt/entrypoint.sh \
+    && chown app:app /opt/entrypoint.sh \
+    && chown -R app:app /workspace
 USER app
 
+ENTRYPOINT ["/opt/entrypoint.sh"]
 CMD ["bash", "-lc", "if [ -n \"$PIPELINE_CONFIG\" ]; then bash script/run_local.sh main.py \"$PIPELINE_CONFIG\"; else echo 'Usage: docker compose run --rm -e PIPELINE_CONFIG=example/read_write.yaml app'; fi"]

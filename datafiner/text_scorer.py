@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import fasttext
+import os
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -10,6 +11,7 @@ import re
 import unicodedata
 from typing import Tuple
 
+from pyspark import SparkFiles
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import FloatType
@@ -42,6 +44,48 @@ class TextScorer(PipelineNode, ABC):
                 df = child.run()
                 df_union = df_union.union(df)
         return self.score(df_union)
+
+
+def _resolve_local_model_dir(model_path: str) -> str:
+    normalized = model_path.rstrip("/")
+    base_name = os.path.basename(normalized)
+
+    candidates = [
+        normalized,
+        os.path.join(normalized, base_name),
+        f"{normalized}.zip",
+        os.path.join(f"{normalized}.zip", base_name),
+        base_name,
+        f"{base_name}.zip",
+        os.path.join(f"{base_name}.zip", base_name),
+    ]
+
+    try:
+        spark_files_root = SparkFiles.getRootDirectory()
+        candidates.extend(
+            [
+                os.path.join(spark_files_root, normalized),
+                os.path.join(spark_files_root, base_name),
+                os.path.join(spark_files_root, f"{base_name}.zip"),
+                os.path.join(spark_files_root, f"{base_name}.zip", base_name),
+            ]
+        )
+    except Exception:
+        pass
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isdir(candidate):
+            config_path = os.path.join(candidate, "config.json")
+            if os.path.isfile(config_path):
+                return candidate
+
+    return model_path
 
 
 @register("FastTextScorer")
@@ -158,9 +202,12 @@ class SeqClassifierScorer(TextScorer):
 
         def score_udf(text):
             if not hasattr(score_udf, "tokenizer"):
-                score_udf.tokenizer = AutoTokenizer.from_pretrained(model_path)
+                resolved_model_path = _resolve_local_model_dir(model_path)
+                score_udf.tokenizer = AutoTokenizer.from_pretrained(
+                    resolved_model_path
+                )
                 score_udf.model = AutoModelForSequenceClassification.from_pretrained(
-                    model_path
+                    resolved_model_path
                 )
                 score_udf.model.eval()
             clean_text = text.replace("\n", " ").replace("\r", " ").strip()
