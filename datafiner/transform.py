@@ -1,90 +1,109 @@
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
+import pandas as pd
+
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import union_children
 from datafiner.register import register
-import pyspark.sql.functions as F
-from abc import ABC, abstractmethod
-from pyspark.sql.functions import col, concat_ws, transform
 
 
 @register("AddConstants")
 class AddConstants(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         constant_list: list,
         column_list: list,
         child_configs=None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.constant_list = constant_list
         self.column_list = column_list
         assert len(self.constant_list) == len(self.column_list), (
-            f"columns and constants should match!"
+            "columns and constants should match!"
         )
 
     def run(self):
-        df = self.children[0].run()
-        for column_name, constant in zip(self.column_list, self.constant_list):
-            df = df.withColumn(column_name, F.lit(constant))
-        return df
+        ds = union_children(self.children, by_name=False)
+
+        def add_constants(batch: pd.DataFrame) -> pd.DataFrame:
+            out = batch.copy()
+            for column_name, constant in zip(self.column_list, self.constant_list):
+                out[column_name] = constant
+            return out
+
+        return ds.map_batches(add_constants, batch_format="pandas")
 
 
 @register("ConversationToParagraph")
 class ConversationToParagraph(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         input_col: str,
         output_col: str,
         separator: str = "\n\n",
         field_key: str = "content",
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.input_col = input_col
         self.output_col = output_col
         self.separator = separator
         self.field_key = field_key
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
+        ds = union_children(self.children, by_name=False)
 
-        # Convert list of dicts (array<struct>) into single paragraph text
-        return df.withColumn(
-            self.output_col,
-            concat_ws(
-                self.separator,
-                transform(col(self.input_col), lambda x: x.getField(self.field_key)),
-            ),
-        )
+        def convert(batch: pd.DataFrame) -> pd.DataFrame:
+            out = batch.copy()
+
+            def to_paragraph(value):
+                if value is None:
+                    return None
+                if not isinstance(value, (list, tuple)):
+                    return str(value)
+                parts = []
+                for item in value:
+                    if isinstance(item, dict):
+                        part = item.get(self.field_key)
+                    else:
+                        part = item
+                    if part is not None:
+                        parts.append(str(part))
+                return self.separator.join(parts)
+
+            out[self.output_col] = out[self.input_col].map(to_paragraph)
+            return out
+
+        return ds.map_batches(convert, batch_format="pandas")
 
 
 @register("ConcatenateColumns")
 class ConcatenateColumns(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         input_cols: list,
         output_col: str,
         separator: str = " ",
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.input_cols = input_cols
         self.output_col = output_col
         self.separator = separator
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
+        ds = union_children(self.children, by_name=False)
 
-        return df.withColumn(
-            self.output_col,
-            concat_ws(self.separator, *[col(c) for c in self.input_cols]),
-        )
+        def concat(batch: pd.DataFrame) -> pd.DataFrame:
+            out = batch.copy()
+            out[self.output_col] = (
+                out[self.input_cols]
+                .fillna("")
+                .astype(str)
+                .agg(self.separator.join, axis=1)
+                .str.strip()
+            )
+            return out
+
+        return ds.map_batches(concat, batch_format="pandas")

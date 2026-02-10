@@ -1,71 +1,40 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import json
 import os
-import signal
 import shutil
+import signal
 from pathlib import Path
 from typing import Iterable, List
 
 import fasttext
 import pyarrow as pa
 import pyarrow.parquet as pq
+import ray
 from huggingface_hub import HfApi, hf_hub_download, list_repo_files
-from pyspark.sql import SparkSession
 from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast
-
-
-_LANCE_SPARK_SESSION = None
-
-
-def _as_lance_identifier(path: str) -> str:
-    if path.startswith("lance."):
-        return path
-    return f"lance.`{path.replace('`', '``')}`"
-
-
-def _get_lance_spark_session() -> SparkSession:
-    global _LANCE_SPARK_SESSION
-    if _LANCE_SPARK_SESSION is not None:
-        return _LANCE_SPARK_SESSION
-
-    builder = (
-        SparkSession.builder.appName("prepare_local_sample_lance")
-        .master("local[*]")
-        .config("spark.sql.catalog.lance", "com.lancedb.lance.spark.LanceCatalog")
-        .config("spark.sql.extensions", "com.lancedb.lance.spark.extensions.LanceSparkSessionExtensions")
-        .config("spark.sql.shuffle.partitions", "8")
-    )
-
-    spark_home = os.environ.get("SPARK_HOME")
-    lance_jar = None
-    if spark_home:
-        for candidate in sorted(Path(spark_home).glob("jars/lance-spark-bundle*.jar")):
-            lance_jar = str(candidate)
-            break
-
-    if lance_jar:
-        builder = builder.config("spark.jars", lance_jar)
-    else:
-        lance_pkg = os.environ.get(
-            "LANCE_SPARK_PACKAGE", "com.lancedb:lance-spark-bundle-3.5_2.12:0.0.15"
-        )
-        builder = builder.config("spark.jars.packages", lance_pkg)
-
-    _LANCE_SPARK_SESSION = builder.getOrCreate()
-    return _LANCE_SPARK_SESSION
 
 
 def _pick_first_parquet(repo_id: str, max_size_bytes: int | None = None) -> str:
     api = HfApi()
     try:
-        entries = list(api.list_repo_tree(repo_id=repo_id, repo_type="dataset", recursive=True))
-        parquet_entries = [e for e in entries if getattr(e, "path", "").endswith(".parquet")]
+        entries = list(
+            api.list_repo_tree(repo_id=repo_id, repo_type="dataset", recursive=True)
+        )
+        parquet_entries = [
+            e for e in entries if getattr(e, "path", "").endswith(".parquet")
+        ]
         if not parquet_entries:
             raise RuntimeError(f"No parquet files found in dataset repo: {repo_id}")
 
         if max_size_bytes is not None:
-            small = [e for e in parquet_entries if getattr(e, "size", None) is not None and e.size <= max_size_bytes]
+            small = [
+                e
+                for e in parquet_entries
+                if getattr(e, "size", None) is not None and e.size <= max_size_bytes
+            ]
             if small:
                 return sorted(small, key=lambda x: (x.size, x.path))[0].path
 
@@ -81,7 +50,9 @@ def _pick_first_parquet(repo_id: str, max_size_bytes: int | None = None) -> str:
         return parquet_files[0]
 
 
-def _load_texts_from_hf(dataset: str, rows: int, max_size_bytes: int | None = None) -> List[str]:
+def _load_texts_from_hf(
+    dataset: str, rows: int, max_size_bytes: int | None = None
+) -> List[str]:
     source_file = _pick_first_parquet(dataset, max_size_bytes=max_size_bytes)
     local_file = hf_hub_download(repo_id=dataset, filename=source_file, repo_type="dataset")
     table = pq.read_table(local_file)
@@ -126,7 +97,7 @@ def _load_texts_from_hf(dataset: str, rows: int, max_size_bytes: int | None = No
 def _fallback_texts(rows: int) -> List[str]:
     base = [
         "Open-source language model training requires scalable data pipelines.",
-        "Spark local mode is useful for rapid preprocessing validation.",
+        "Ray local mode is useful for rapid preprocessing validation.",
         "High quality text filtering improves downstream model performance.",
         "Deduplication helps reduce memorization and near-copy artifacts.",
         "Tokenization and data mixing are core stages in corpus preparation.",
@@ -144,11 +115,10 @@ def _write_lance(path: Path, rows: Iterable[dict]) -> None:
             shutil.rmtree(path)
         else:
             path.unlink()
-    table = pa.Table.from_pylist(list(rows))
-    spark = _get_lance_spark_session()
-    spark.createDataFrame(table.to_pandas()).writeTo(_as_lance_identifier(str(path))).using(
-        "lance"
-    ).createOrReplace()
+
+    items = list(rows)
+    ds = ray.data.from_items(items)
+    ds.write_lance(str(path), mode="overwrite")
 
 
 def _build_scored_rows(texts: List[str]) -> List[dict]:
@@ -201,7 +171,7 @@ def _prepare_tiny_seq_classifier(model_dir: Path) -> Path:
         "[MASK]",
         "open",
         "source",
-        "spark",
+        "ray",
         "data",
         "model",
         "pipeline",
@@ -218,7 +188,7 @@ def _prepare_tiny_seq_classifier(model_dir: Path) -> Path:
     ]
     vocab_path = seq_dir / "vocab.txt"
     with vocab_path.open("w", encoding="utf-8") as f:
-        f.write("\\n".join(vocab) + "\\n")
+        f.write("\n".join(vocab) + "\n")
 
     tokenizer = BertTokenizerFast(vocab_file=str(vocab_path), do_lower_case=True)
     tokenizer.save_pretrained(str(seq_dir))
@@ -237,10 +207,12 @@ def _prepare_tiny_seq_classifier(model_dir: Path) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare local sample data/models for all example YAMLs")
+    parser = argparse.ArgumentParser(
+        description="Prepare local sample data/models for all example YAMLs"
+    )
     parser.add_argument("--dataset", default="thu-pacman/PCMind-2.1-Kaiyuan-2B")
     parser.add_argument("--rows", type=int, default=200)
-    parser.add_argument("--data-root", default="/data")
+    parser.add_argument("--data-root", default="data")
     parser.add_argument(
         "--source-mode",
         choices=["auto", "hf", "synthetic"],
@@ -260,6 +232,9 @@ def main() -> None:
         help="In auto mode, prefer parquet files at or below this size.",
     )
     args = parser.parse_args()
+
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True, log_to_driver=True)
 
     data_root = Path(args.data_root)
     sample_dir = data_root / "sample"
@@ -283,7 +258,9 @@ def main() -> None:
             max_size_bytes = None
             if args.source_mode == "auto":
                 max_size_bytes = args.max_hf_parquet_mb * 1024 * 1024
-            texts = _load_texts_from_hf(args.dataset, args.rows, max_size_bytes=max_size_bytes)
+            texts = _load_texts_from_hf(
+                args.dataset, args.rows, max_size_bytes=max_size_bytes
+            )
             source = "huggingface"
         except Exception as exc:
             if args.source_mode == "hf":
@@ -326,7 +303,9 @@ def main() -> None:
     _write_fasttext_train_file(mmlu_train_path, mmlu_rows)
 
     fasttext_hq_model = _train_fasttext_model(hq_train_path, model_dir / "fasttext_hq")
-    fasttext_mmlu_model = _train_fasttext_model(mmlu_train_path, model_dir / "fasttext_mmlu")
+    fasttext_mmlu_model = _train_fasttext_model(
+        mmlu_train_path, model_dir / "fasttext_mmlu"
+    )
     tiny_seq_classifier_dir = _prepare_tiny_seq_classifier(model_dir)
 
     manifest = {
@@ -348,11 +327,6 @@ def main() -> None:
     manifest_path = sample_dir / "manifest.json"
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
-
-    global _LANCE_SPARK_SESSION
-    if _LANCE_SPARK_SESSION is not None:
-        _LANCE_SPARK_SESSION.stop()
-        _LANCE_SPARK_SESSION = None
 
     print("Prepared local assets for all examples:")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))

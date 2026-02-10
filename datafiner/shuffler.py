@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import union_children
 from datafiner.register import register
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
 
 
 @register("Shuffler")
@@ -12,28 +13,26 @@ class Shuffler(PipelineNode):
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
+        seed: int | None = None,
         child_configs: list = None,
     ):
         """
         Initializes the Shuffle node.
 
         Args:
-            spark (SparkSession): The Spark session object.
+            runtime: Ray runtime configuration.
             child_configs (list, optional): List of child node configurations. Defaults to None.
         """
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
+        self.seed = seed
 
-    def run(self) -> DataFrame:
+    def run(self):
         """
         Executes the global shuffle.
 
         Returns:
-            DataFrame: The shuffled DataFrame.
+            Ray dataset: The shuffled dataset.
         """
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-
-        return df.orderBy(F.rand())
+        ds = union_children(self.children, by_name=False)
+        return ds.random_shuffle(seed=self.seed)

@@ -1,41 +1,20 @@
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.types import StringType, ArrayType, IntegerType
+import pandas as pd
 from transformers import AutoTokenizer
+
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import union_children
 from datafiner.register import register
 
 
 @register("Detokenization")
 class Detokenization(PipelineNode):
     """
-    Detokenization pipeline node that converts token IDs back to text.
-
-    Args:
-        spark: SparkSession instance
-        tokenizer_name_or_path: Path or name of the pretrained tokenizer
-        input_col: Column name containing token IDs (default: "text_tokenized")
-        output_col: Column name for decoded text output (default: "text_decoded")
-        skip_special_tokens: Whether to skip special tokens in decoding (default: True)
-        clean_up_tokenization_spaces: Whether to clean up extra spaces (default: True)
-        child_configs: List of child pipeline configurations
-
-    Example:
-        ```python
-        detokenizer = Detokenization(
-            spark=spark,
-            tokenizer_name_or_path="bert-base-uncased",
-            input_col="text_tokenized",
-            output_col="text_decoded",
-            skip_special_tokens=True
-        )
-        df_decoded = detokenizer.run()
-        ```
+    Convert token IDs back to text.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         tokenizer_name_or_path: str,
         input_col: str = "text_tokenized",
         output_col: str = "text_decoded",
@@ -43,96 +22,56 @@ class Detokenization(PipelineNode):
         clean_up_tokenization_spaces: bool = True,
         child_configs: list = None,
     ) -> None:
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.tokenizer_name_or_path = tokenizer_name_or_path
         self.input_col = input_col
         self.output_col = output_col
         self.skip_special_tokens = skip_special_tokens
         self.clean_up_tokenization_spaces = clean_up_tokenization_spaces
 
-    def run(self) -> DataFrame:
-        """
-        Execute the detokenization pipeline.
+    def run(self):
+        ds = union_children(self.children, by_name=False)
+        return self.detokenize(ds)
 
-        Returns:
-            DataFrame with detokenized text column added
-        """
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return self.detokenize(df)
-
-    def detokenize(self, df: DataFrame) -> DataFrame:
-        """
-        Apply detokenization to the input DataFrame.
-
-        Args:
-            df: Input DataFrame containing token IDs column
-
-        Returns:
-            DataFrame with decoded text column added
-        """
+    def detokenize(self, ds):
         tokenizer_name_or_path = self.tokenizer_name_or_path
         skip_special_tokens = self.skip_special_tokens
         clean_up_tokenization_spaces = self.clean_up_tokenization_spaces
 
-        def decode_udf(token_ids):
-            """
-            UDF to decode token IDs back to text.
-            Uses lazy loading to initialize tokenizer once per executor.
-            """
-            if token_ids is None:
-                return None
-
-            if not hasattr(decode_udf, "tokenizer"):
-                decode_udf.tokenizer = AutoTokenizer.from_pretrained(
+        def decode_batch(batch: pd.DataFrame) -> pd.DataFrame:
+            if not hasattr(decode_batch, "tokenizer"):
+                decode_batch.tokenizer = AutoTokenizer.from_pretrained(
                     tokenizer_name_or_path
                 )
 
-            return decode_udf.tokenizer.decode(
-                token_ids,
-                skip_special_tokens=skip_special_tokens,
-                clean_up_tokenization_spaces=clean_up_tokenization_spaces,
-            )
+            out = batch.copy()
 
-        func = F.udf(decode_udf, StringType())
-        return df.withColumn(self.output_col, func(F.col(self.input_col)))
+            def _decode(token_ids):
+                if token_ids is None:
+                    return None
+                if not isinstance(token_ids, (list, tuple)):
+                    return None
+                return decode_batch.tokenizer.decode(
+                    token_ids,
+                    skip_special_tokens=skip_special_tokens,
+                    clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+                )
+
+            out[self.output_col] = out[self.input_col].map(_decode)
+            return out
+
+        return ds.map_batches(decode_batch, batch_format="pandas")
 
 
-# Optional: Batch detokenization for better performance
 @register("BatchDetokenization")
-class BatchDetokenization(PipelineNode):
+class BatchDetokenization(Detokenization):
     """
-    Batch detokenization pipeline node for improved performance.
-    Processes multiple rows at once using pandas UDF.
-
-    Args:
-        spark: SparkSession instance
-        tokenizer_name_or_path: Path or name of the pretrained tokenizer
-        input_col: Column name containing token IDs (default: "text_tokenized")
-        output_col: Column name for decoded text output (default: "text_decoded")
-        skip_special_tokens: Whether to skip special tokens in decoding (default: True)
-        clean_up_tokenization_spaces: Whether to clean up extra spaces (default: True)
-        batch_size: Number of rows to process in each batch (default: 1000)
-        child_configs: List of child pipeline configurations
-
-    Example:
-        ```python
-        batch_detokenizer = BatchDetokenization(
-            spark=spark,
-            tokenizer_name_or_path="gpt2",
-            input_col="text_tokenized",
-            output_col="text_decoded",
-            batch_size=1000
-        )
-        df_decoded = batch_detokenizer.run()
-        ```
+    Batch detokenization alias. Ray map_batches already processes data in batches.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         tokenizer_name_or_path: str,
         input_col: str = "text_tokenized",
         output_col: str = "text_decoded",
@@ -141,70 +80,13 @@ class BatchDetokenization(PipelineNode):
         batch_size: int = 1000,
         child_configs: list = None,
     ) -> None:
-        super().__init__(spark, child_configs)
-        self.tokenizer_name_or_path = tokenizer_name_or_path
-        self.input_col = input_col
-        self.output_col = output_col
-        self.skip_special_tokens = skip_special_tokens
-        self.clean_up_tokenization_spaces = clean_up_tokenization_spaces
+        super().__init__(
+            runtime=runtime,
+            tokenizer_name_or_path=tokenizer_name_or_path,
+            input_col=input_col,
+            output_col=output_col,
+            skip_special_tokens=skip_special_tokens,
+            clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+            child_configs=child_configs,
+        )
         self.batch_size = batch_size
-
-    def run(self) -> DataFrame:
-        """
-        Execute the batch detokenization pipeline.
-
-        Returns:
-            DataFrame with detokenized text column added
-        """
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return self.detokenize(df)
-
-    def detokenize(self, df: DataFrame) -> DataFrame:
-        """
-        Apply batch detokenization to the input DataFrame.
-
-        Args:
-            df: Input DataFrame containing token IDs column
-
-        Returns:
-            DataFrame with decoded text column added
-        """
-        from pyspark.sql.functions import pandas_udf
-        import pandas as pd
-
-        tokenizer_name_or_path = self.tokenizer_name_or_path
-        skip_special_tokens = self.skip_special_tokens
-        clean_up_tokenization_spaces = self.clean_up_tokenization_spaces
-
-        @pandas_udf(StringType())
-        def decode_batch_udf(token_ids_series: pd.Series) -> pd.Series:
-            """
-            Pandas UDF to decode batches of token IDs back to text.
-            More efficient for large datasets.
-            """
-            if not hasattr(decode_batch_udf, "tokenizer"):
-                decode_batch_udf.tokenizer = AutoTokenizer.from_pretrained(
-                    tokenizer_name_or_path
-                )
-
-            tokenizer = decode_batch_udf.tokenizer
-
-            # Handle None values
-            results = []
-            for token_ids in token_ids_series:
-                if token_ids is None or len(token_ids) == 0:
-                    results.append(None)
-                else:
-                    decoded = tokenizer.decode(
-                        token_ids,
-                        skip_special_tokens=skip_special_tokens,
-                        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
-                    )
-                    results.append(decoded)
-
-            return pd.Series(results)
-
-        return df.withColumn(self.output_col, decode_batch_udf(F.col(self.input_col)))

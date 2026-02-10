@@ -1,206 +1,148 @@
-from pyspark.sql import SparkSession, DataFrame
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import drop_columns, select_columns, show_dataset, union_children
 from datafiner.register import register
-import pyspark.sql.functions as F
 
 
 @register("ColumnSelect")
 class ColumnSelect(PipelineNode):
     """
-    A pipeline node to select a specific set of columns,
-    dropping all others.
+    Select a specific set of columns.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         select_cols: list,
         child_configs: list = None,
     ):
-        """
-        Initializes the ColumnSelect node.
-
-        Args:
-            spark (SparkSession): The Spark session object.
-            select_cols (list): A list of column names to keep.
-            child_configs (list, optional): List of child node configurations.
-        """
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         if not isinstance(select_cols, list) or not select_cols:
             raise ValueError("'select_cols' must be a non-empty list.")
         self.select_cols = select_cols
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-
+        ds = union_children(self.children, by_name=False)
         print(f"[ColumnSelect] Selecting columns: {self.select_cols}")
-        return df.select(*self.select_cols)
+        return select_columns(ds, self.select_cols)
 
 
 @register("ColumnDrop")
 class ColumnDrop(PipelineNode):
     """
-    A pipeline node to drop a specific set of columns,
-    keeping all others.
+    Drop a specific set of columns.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         drop_cols: list,
         child_configs: list = None,
     ):
-        """
-        Initializes the ColumnDrop node.
-
-        Args:
-            spark (SparkSession): The Spark session object.
-            drop_cols (list): A list of column names to drop.
-            child_configs (list, optional): List of child node configurations.
-        """
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         if not isinstance(drop_cols, list) or not drop_cols:
             raise ValueError("'drop_cols' must be a non-empty list.")
         self.drop_cols = drop_cols
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-
+        ds = union_children(self.children, by_name=False)
         print(f"[ColumnDrop] Dropping columns: {self.drop_cols}")
-        return df.drop(*self.drop_cols)
+        return drop_columns(ds, self.drop_cols)
 
 
 @register("ColumnAlias")
 class ColumnAlias(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         input_col: str,
         output_col: str,
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.input_col = input_col
         self.output_col = output_col
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return df.withColumnRenamed(self.input_col, self.output_col)
+        ds = union_children(self.children, by_name=False)
+
+        def alias_batch(batch):
+            out = batch.copy()
+            if self.input_col in out.columns:
+                out = out.rename(columns={self.input_col: self.output_col})
+            return out
+
+        return ds.map_batches(alias_batch, batch_format="pandas")
 
 
 @register("Schema")
 class Schema(PipelineNode):
     """
-    print schema
+    Print schema.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
 
-    def run(self) -> DataFrame:
-        # Get DataFrame from child node(s)
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-
-        print("\n--- DataFrame Schema ---")
-        df.printSchema()
-        print("------------------------------\n")
-
-        # Return the DataFrame unchanged
-        return df
+    def run(self):
+        ds = union_children(self.children, by_name=False)
+        print("\n--- Dataset Schema ---")
+        print(ds.schema())
+        print("----------------------\n")
+        return ds
 
 
 @register("Row Number")
 class RowNumber(PipelineNode):
     """
-    print row number
+    Print row count.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
 
-    def run(self) -> DataFrame:
-        # Get DataFrame from child node(s)
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-
-        # Perform the count action
-        count = df.count()
-
-        print(f"\n--- DataFrame Row Count ---")
+    def run(self):
+        ds = union_children(self.children, by_name=False)
+        count = ds.count()
+        print("\n--- Dataset Row Count ---")
         print(f"Total Rows: {count}")
-        print("-------------------------------\n")
-
-        # Return the DataFrame unchanged
-        return df
+        print("-------------------------\n")
+        return ds
 
 
 @register("Stat")
 class Stat(PipelineNode):
     """
-    1. show schema
-    2. print row number
-    3. show head, top 20 row, should at least show column titles for each column.
+    Print schema, row count, and top rows.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
 
-    def run(self) -> DataFrame:
-        # Get DataFrame from child node(s)
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
+    def run(self):
+        ds = union_children(self.children, by_name=False)
 
-        # Cache the DataFrame since we are performing multiple actions
-        df.cache()
+        print("\n--- Dataset Statistics ---")
+        print("\n--- 1. Dataset Schema ---")
+        print(ds.schema())
 
-        print("\n--- DataFrame Statistics ---")
-
-        # 1. show schema
-        print("\n--- 1. DataFrame Schema ---")
-        df.printSchema()
-
-        # 2. print row number
-        print("\n--- 2. DataFrame Row Count ---")
-        count = df.count()
+        print("\n--- 2. Dataset Row Count ---")
+        count = ds.count()
         print(f"Total Rows: {count}")
 
-        # 3. show head, top 20 row
-        print("\n--- 3. DataFrame Head (Top 20) ---")
-        # df.show() defaults to 20 rows and includes column titles
-        df.show(20)
+        print("\n--- 3. Dataset Head (Top 20) ---")
+        show_dataset(ds, n=20, vertical=False)
 
-        print("----------------------------------\n")
-
-        # Unpersist the DataFrame after use
-        df.unpersist()
-
-        # Return the original DataFrame for the next pipeline step
-        return df
+        print("----------------------------\n")
+        return ds

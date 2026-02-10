@@ -1,131 +1,108 @@
+import numpy as np
+import pandas as pd
+
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import dataset_from_pandas, union_children
 from datafiner.register import register
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.types import FloatType, LongType
 
 
 @register("DuplicateSampleRatio")
 class DuplicateSampleRatio(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
         global_sample_rate: float = 0.1,
         max_sample: float = 20.0,
         col: str = "duplicate_count",
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.global_sample_rate = global_sample_rate
         self.max_sample = max_sample
         self.col = col
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
+        ds = union_children(self.children, by_name=False)
 
-        global_sample_rate = self.global_sample_rate
-        max_sample = self.max_sample
+        def apply_ratio(batch: pd.DataFrame) -> pd.DataFrame:
+            out = batch.copy()
+            out[self.col] = (
+                pd.to_numeric(out[self.col], errors="coerce").fillna(0) * self.global_sample_rate
+            ).clip(upper=self.max_sample)
+            return out
 
-        def get_sample_udf(duplicate_count):
-            sample = duplicate_count * global_sample_rate
-            if sample > max_sample:
-                sample = max_sample
-            return sample
-
-        func = F.udf(get_sample_udf, FloatType())
-        return df.withColumn(self.col, func(F.col(self.col)))
+        return ds.map_batches(apply_ratio, batch_format="pandas")
 
 
 @register("Sampler")
 class Sampler(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
         col: str = "duplicate_count",
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.col = col
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return self.sample(df)
+        ds = union_children(self.children, by_name=False)
+        return self.sample(ds)
 
-    def sample(self, df: DataFrame) -> DataFrame:
-        # Convert the sampling column to integer type after applying probabilistic sampling
-        # For float values like 2.7, we use floor + random to decide whether to round up
-        df_with_counts = df.withColumn(
-            self.col,  # Use a new column name to avoid confusion
-            (
-                F.floor(F.col(self.col))
-                + F.when(
-                    F.rand() < (F.col(self.col) - F.floor(F.col(self.col))), 1
-                ).otherwise(0)
-            ),
-        )
+    def sample(self, ds):
+        def apply_sample(batch: pd.DataFrame) -> pd.DataFrame:
+            out = batch.copy()
+            values = pd.to_numeric(out[self.col], errors="coerce").fillna(0)
+            floors = np.floor(values)
+            probs = values - floors
+            random_draw = np.random.rand(len(out))
+            sampled = floors + (random_draw < probs)
+            out[self.col] = sampled.astype(int)
+            out = out[out[self.col] > 0]
+            return out
 
-        # Filter out rows where sample_count is 0
-        df_with_counts = df_with_counts.filter(F.col(self.col) > 0)
-
-        return df_with_counts
+        return ds.map_batches(apply_sample, batch_format="pandas")
 
 
 @register("Flatten")
 class Flatten(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
         col: str = "duplicate_count",
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.col = col
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return self.flatten(df)
+        ds = union_children(self.children, by_name=False)
+        return self.flatten(ds)
 
-    def flatten(self, df: DataFrame) -> DataFrame:
-        # Ensure the column is integer type for sequence generation
-        # df = df.withColumn(self.col, F.col(self.col).cast(LongType()))
+    def flatten(self, ds):
+        pdf = ds.to_pandas()
+        if pdf.empty:
+            return ds
 
-        # explode the data
-        df_with_array = df.withColumn(
-            "repeat_array", F.expr(f"sequence(1, {self.col})")
-        )
-        df_with_array.show()
+        repeats = pd.to_numeric(pdf[self.col], errors="coerce").fillna(0).astype(int)
+        repeats = repeats.clip(lower=0)
+        non_repeat_cols = [c for c in pdf.columns if c != self.col]
 
-        # expand the array, generate repeated rows
-        df_expanded = df_with_array.select(
-            *[col for col in df.columns if col != self.col],
-            F.explode("repeat_array").alias("_dummy"),
-        ).drop(
-            "_dummy", "repeat_array"
-        )  # Remove repeat_count reference since it doesn't exist
-
-        return df_expanded
+        expanded = pdf.loc[pdf.index.repeat(repeats)][non_repeat_cols].reset_index(drop=True)
+        return dataset_from_pandas(expanded)
 
 
 @register("GroupFlatten")
 class GroupFlatten(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         child_configs: list = None,
         cols: list = None,
         sub_cols: list = None,
         output_cols: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         assert cols is not None and len(cols) >= 1, (
             "GroupFlatten requires at least one array column."
         )
@@ -137,23 +114,38 @@ class GroupFlatten(PipelineNode):
         )
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return self.flatten(df)
+        ds = union_children(self.children, by_name=False)
+        return self.flatten(ds)
 
-    def flatten(self, df: DataFrame) -> DataFrame:
-        # zip all arrays (array<struct>)
-        df = df.withColumn("zipped", F.arrays_zip(*self.cols))
+    def flatten(self, ds):
+        pdf = ds.to_pandas()
+        if pdf.empty:
+            return ds
 
-        # explode the zipped array
-        df = df.withColumn("z", F.explode("zipped")).drop("zipped")
+        expanded_rows = []
+        for _, row in pdf.iterrows():
+            arrays = [row.get(c) for c in self.cols]
+            if not arrays or any(a is None for a in arrays):
+                continue
+            min_len = min(len(a) for a in arrays)
+            for i in range(min_len):
+                new_row = row.to_dict()
+                for idx, sub_col in enumerate(self.sub_cols):
+                    out_col = self.output_cols[idx]
+                    source_col = self.cols[idx] if idx < len(self.cols) else self.cols[0]
+                    value = row.get(source_col)
+                    if isinstance(value, (list, tuple)) and i < len(value):
+                        item = value[i]
+                        if isinstance(item, dict):
+                            new_row[out_col] = item.get(sub_col)
+                        else:
+                            new_row[out_col] = item
+                    else:
+                        new_row[out_col] = None
+                expanded_rows.append(new_row)
 
-        for idx, c in enumerate(self.sub_cols):
-            c_out = self.output_cols[idx]
-            df = df.withColumn(c_out, F.col(f"z.{c}"))  # get map value
+        if not expanded_rows:
+            return dataset_from_pandas(pd.DataFrame(columns=pdf.columns))
 
-        df = df.drop("z")
-        df.show()
-        return df
+        out = pd.DataFrame(expanded_rows)
+        return dataset_from_pandas(out)

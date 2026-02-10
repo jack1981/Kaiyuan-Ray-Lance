@@ -1,33 +1,24 @@
-import yaml
+from __future__ import annotations
+
 import argparse
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from datafiner.base import PipelineNode, PipelineTree
-from datafiner.register import register
 from typing import Tuple
 
+import yaml
 
-def _as_lance_identifier(path: str) -> str:
-    if path.startswith("lance."):
-        return path
-    return f"lance.`{path.replace('`', '``')}`"
+from datafiner.base import PipelineNode, PipelineTree
+from datafiner.dataset_utils import dataset_from_pandas, normalize_lance_path, select_columns, union_children
+from datafiner.register import register
 
 
 @register("Splitter")
 class Splitter(PipelineNode):
     """
-    Splits a DataFrame into two disjoint sets (training and validation)
-    and writes them to specified Lance output paths.
-
-    Includes two methods for splitting:
-    - 'exact': Guarantees an exact number of rows in the training set.
-    - 'fast_approximate': A faster, fully parallel method that results in an
-      approximate number of training rows. Ideal for very large datasets.
+    Split a dataset into train and validation sets and write both to Lance.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         train_file: str,
         val_file: str,
         num_train: int,
@@ -39,15 +30,14 @@ class Splitter(PipelineNode):
         select_cols: list = None,
         shuffle_train: bool = False,
         child_configs: list = None,
+        storage_options: dict | None = None,
     ) -> None:
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
 
         if not isinstance(num_train, int) or num_train <= 0:
             raise ValueError("'num_train' must be a positive integer.")
         if split_method not in ["exact", "fast_approximate"]:
-            raise ValueError(
-                "'split_method' must be either 'exact' or 'fast_approximate'."
-            )
+            raise ValueError("'split_method' must be either 'exact' or 'fast_approximate'.")
 
         self.train_file = train_file
         self.val_file = val_file
@@ -59,169 +49,116 @@ class Splitter(PipelineNode):
         self.mode = mode
         self.select_cols = select_cols
         self.shuffle_train = shuffle_train
+        self.storage_options = storage_options or self.runtime.storage_options
 
-    def run(self) -> DataFrame:
-        """Orchestrates the splitting and writing logic."""
-        # 1. Prepare initial DataFrame
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
+    def run(self):
+        ds = union_children(self.children, by_name=False)
 
         if self.shuffle and self.split_method == "exact":
-            print(
-                "Shuffle is enabled for 'exact' method. Shuffling the entire dataset..."
-            )
-            df = df.orderBy(F.rand())
+            print("Shuffle is enabled for 'exact' split. Shuffling the full dataset...")
+            ds = ds.random_shuffle(seed=42)
 
         if self.select_cols is not None:
-            df = df.select(*self.select_cols)
+            ds = select_columns(ds, self.select_cols)
 
-        # 2. Perform the split using the chosen method
         if self.split_method == "exact":
-            train_df, val_df, df_to_unpersist = self._split_exact(df)
-        else:  # fast_approximate
-            train_df, val_df = self._split_fast_approximate(df)
-            df_to_unpersist = None  # Fast method caches splits directly
+            train_ds, val_ds = self._split_exact(ds)
+        else:
+            train_ds, val_ds = self._split_fast_approximate(ds)
 
-        # 3. Write splits to disk with clear job descriptions
-        self._write_split(
-            train_df,
-            self.train_file,
-            self.num_train_files,
-            self.shuffle_train,
-            f"Splitter: Writing TRAIN split to {self.train_file}",
-        )
-        self._write_split(
-            val_df,
-            self.val_file,
-            self.num_val_files,
-            False,
-            f"Splitter: Writing VALIDATION split to {self.val_file}",
-        )
+        if self.shuffle_train:
+            train_ds = train_ds.random_shuffle(seed=42)
 
-        # 4. Clean up any cached DataFrames
-        if df_to_unpersist:
-            df_to_unpersist.unpersist()
-        if self.split_method == "fast_approximate":
-            train_df.unpersist()
-            val_df.unpersist()
+        self._write_split(train_ds, self.train_file, self.num_train_files)
+        self._write_split(val_ds, self.val_file, self.num_val_files)
 
         print("Splitting and writing completed successfully.")
-        return val_df
+        return val_ds
 
-    def _write_split(
-        self, df: DataFrame, path: str, num_files: int, shuffle: bool, description: str
-    ):
-        """Helper function to write a DataFrame split with a job description."""
-        print(description)
-        # Set a clear description for this Spark job
-        self.spark.sparkContext.setJobDescription(description)
-
-        if shuffle:
-            print("Shuffling training data before writing...")
-            df = df.orderBy(F.rand())
-            df.show(10)
+    def _write_split(self, ds, path: str, num_files: int):
         if num_files:
-            df = df.repartition(num_files)
+            ds = ds.repartition(num_files)
 
-        lance_identifier = _as_lance_identifier(path)
-        writer_v2 = df.writeTo(lance_identifier)
-        if self.mode == "append":
-            writer_v2.append()
-        elif self.mode == "ignore":
-            try:
-                writer_v2.using("lance").create()
-            except Exception as exc:
-                if "already exists" not in str(exc).lower():
-                    raise
-        else:
-            writer_v2.using("lance").createOrReplace()
+        mode = self.mode
+        ray_mode = {
+            "overwrite": "overwrite",
+            "append": "append",
+            "ignore": "create",
+            "create": "create",
+        }.get(mode, "overwrite")
 
-        # Clear the description after the action is complete
-        self.spark.sparkContext.setJobDescription(None)
-
-    def _split_exact(self, df: DataFrame) -> Tuple[DataFrame]:
-        """Splits the DataFrame into an exact number of training rows."""
-        print(f"Using 'exact' split method for {self.num_train} training rows.")
-        tmp_id_col = "__temp_splitter_id__"
-        df_with_id = df.withColumn(tmp_id_col, F.monotonically_increasing_id())
-
-        # Cache the parent DataFrame to ensure consistency and avoid re-computation
-        df_with_id.cache()
-
-        train_df = df_with_id.limit(self.num_train)
-        val_df = df_with_id.join(
-            train_df.select(tmp_id_col), on=tmp_id_col, how="left_anti"
+        print(f"Writing split to {path} (mode={ray_mode})")
+        ds.write_lance(
+            normalize_lance_path(path),
+            mode=ray_mode,
+            storage_options=self.storage_options,
         )
 
-        # Return the final splits and the temporary DF that needs to be unpersisted later
-        return train_df.drop(tmp_id_col), val_df.drop(tmp_id_col), df_with_id
+    def _split_exact(self, ds) -> Tuple:
+        print(f"Using 'exact' split method for {self.num_train} training rows.")
+        pdf = ds.to_pandas()
 
-    def _split_fast_approximate(self, df: DataFrame) -> Tuple[DataFrame]:
-        """Splits the DataFrame using a highly parallel, approximate method."""
+        if pdf.empty:
+            empty = dataset_from_pandas(pdf)
+            return empty, empty
+
+        train_pdf = pdf.head(self.num_train).reset_index(drop=True)
+        val_pdf = pdf.iloc[self.num_train :].reset_index(drop=True)
+        return dataset_from_pandas(train_pdf), dataset_from_pandas(val_pdf)
+
+    def _split_fast_approximate(self, ds) -> Tuple:
         print(
             f"Using 'fast_approximate' split method for roughly {self.num_train} training rows."
         )
-
-        # This action is necessary to calculate the ratio for randomSplit.
-        count_desc = "Splitter (Fast): Calculating total row count for fraction"
-        self.spark.sparkContext.setJobDescription(count_desc)
-        total_count = df.count()
-        self.spark.sparkContext.setJobDescription(None)
-
+        total_count = ds.count()
         if total_count == 0:
-            return df, df  # Return empty DFs
+            empty = dataset_from_pandas(ds.to_pandas())
+            return empty, empty
 
         if self.num_train >= total_count:
             print(
                 "Warning: 'num_train' is >= total rows. All data will be in the training set."
             )
-            return df, self.spark.createDataFrame([], df.schema)
+            full = ds
+            empty = dataset_from_pandas(ds.limit(0).to_pandas())
+            return full, empty
 
         fraction = self.num_train / total_count
+        train_ds = ds.random_sample(fraction=fraction, seed=42)
+
+        train_pdf = train_ds.to_pandas().reset_index(drop=True)
+        source_pdf = ds.to_pandas().reset_index(drop=True)
+
+        if train_pdf.empty:
+            return dataset_from_pandas(train_pdf), dataset_from_pandas(source_pdf)
+
+        marker_col = "__split_marker__"
+        source_pdf[marker_col] = range(len(source_pdf))
+        train_pdf = train_pdf.copy()
+        train_pdf[marker_col] = range(len(train_pdf))
+
+        cutoff = len(train_pdf)
+        train_exact = source_pdf.head(cutoff).drop(columns=[marker_col])
+        val_exact = source_pdf.iloc[cutoff:].drop(columns=[marker_col])
 
         print(
-            f"Total rows: {total_count}, Target train rows: {self.num_train}, Fraction: {fraction:.6f}"
-        )
-        df.show(10)
-
-        # randomSplit is highly optimized and fully parallel.
-        train_df, val_df = df.randomSplit(
-            [fraction, 1.0 - fraction], seed=42 if self.shuffle else None
+            f"Approximation resulted in {len(train_exact)} training rows (target was {self.num_train})."
         )
 
-        print("Post-split training DataFrame preview:")
-        train_df.show(10)
-
-        print("Post-split validation DataFrame preview:")
-        val_df.show(10)
-
-        # Cache the results of the split because we will perform two actions on them:
-        # one for logging the count (optional) and one for writing the data.
-        train_df.cache()
-        val_df.cache()
-
-        # Optional: Log the actual count for the training set. This is now a fast operation due to caching.
-        log_count_desc = "Splitter (Fast): Logging actual train count"
-        self.spark.sparkContext.setJobDescription(log_count_desc)
-        actual_train_count = train_df.count()
-        self.spark.sparkContext.setJobDescription(None)
-        print(
-            f"Approximation resulted in {actual_train_count} training rows (target was {self.num_train})."
-        )
-
-        return train_df, val_df
+        return dataset_from_pandas(train_exact), dataset_from_pandas(val_exact)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None)
+    parser.add_argument("--mode", type=str, choices=["local", "k8s"], default="local")
+    parser.add_argument("--ray-address", type=str, default=None)
 
     args = parser.parse_args()
-    config = yaml.load(open(args.config, "r"), Loader=yaml.FullLoader)
+    with open(args.config, "r", encoding="utf-8") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
 
-    pipeline = PipelineTree(config)
-    df = pipeline.run()
-    df.show()
-    print(df.count())
+    pipeline = PipelineTree(config, mode=args.mode, ray_address=args.ray_address)
+    ds = pipeline.run()
+    ds.show(20)
+    print(ds.count())

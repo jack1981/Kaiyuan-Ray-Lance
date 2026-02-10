@@ -1,32 +1,21 @@
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.window import Window
 from typing import List, Union
-import logging
 
-from datafiner.register import register
+import numpy as np
+
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import dataset_from_pandas
+from datafiner.register import register
 
 
 @register("InterleavedReorder")
 class InterleavedReorder(PipelineNode):
     """
-    Implements a stratified reordering algorithm using a split-calculate-join
-    optimization strategy to reduce shuffle overhead.
-
-    This node reorders data by:
-    1. Grouping rows by a specified column
-    2. Ranking rows within each group based on score columns
-    3. Rescaling ranks proportionally across all groups
-    4. Sorting the entire dataset by rescaled ranks
-
-    This produces an interleaved ordering where items from different groups
-    are mixed proportionally based on their within-group rankings.
+    Stratified interleaving reorder implemented with pandas on top of Ray Data.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         group_col: str,
         type_num: int,
         score_cols: Union[str, List[str]],
@@ -34,18 +23,7 @@ class InterleavedReorder(PipelineNode):
         perturb: int = 0,
         child_configs: list = None,
     ) -> None:
-        """
-        Args:
-            spark: SparkSession instance
-            group_col: Column name to group by
-            type_num: Number of distinct group types
-            score_cols: Column name(s) to use for scoring within each group.
-                       Use "__random__" for random ordering within a group.
-            ascending: Whether to sort scores in ascending order
-            perturb: Random perturbation factor for rescaled ranks (0 = no perturbation)
-            child_configs: Child pipeline configurations
-        """
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.group_col = group_col
         self.ascending = ascending
         self.perturb = perturb
@@ -63,130 +41,58 @@ class InterleavedReorder(PipelineNode):
                 f"the 'type_num' ({type_num})."
             )
 
-    def reorder(self, df: DataFrame) -> DataFrame:
-        """
-        Applies the reordering logic using an optimized split-join strategy.
+    def reorder(self, ds):
+        pdf = ds.to_pandas()
+        if pdf.empty:
+            return ds
 
-        Algorithm:
-        1. Add unique identifiers and random keys to each row
-        2. Extract minimal columns needed for ranking (uuid, group, score)
-        3. Calculate within-group ranks using window functions
-        4. Rescale ranks proportionally to total dataset size
-        5. Join rescaled ranks back to original data
-        6. Sort by rescaled ranks to produce interleaved output
+        uuid_col = "__uuid__"
+        random_key_col = "__random_key__"
+        sort_key_col = "__group_sort_key__"
+        rank_col = "__group_rank__"
+        group_count_col = "__group_count__"
+        rescaled_rank_col = "__rescaled_rank__"
 
-        Args:
-            df: Input DataFrame
+        work = pdf.copy().reset_index(drop=True)
+        work[uuid_col] = np.arange(len(work))
+        work[random_key_col] = np.random.rand(len(work))
 
-        Returns:
-            Reordered DataFrame with temporary columns removed
-        """
-
-        # Define temporary column names
-        UUID_COL = "__uuid__"
-        RANDOM_KEY_COL = "__random_key__"
-        SORT_KEY_COL = "__group_sort_key__"
-        RANK_COL = "__group_rank__"
-        GROUP_COUNT_COL = "__group_count__"
-        RESCALED_RANK_COL = "__rescaled_rank__"
-
-        # Step 1: Add UUID and random key to each row
-        df_with_ids = df.withColumn(UUID_COL, F.expr("uuid()")).withColumn(
-            RANDOM_KEY_COL, F.rand()
-        )
-        logging.info("Step 1: Added UUID and random key columns")
-
-        # Step 2: Create lightweight DataFrame with only necessary columns
-        # Build dynamic WHEN expression to select appropriate score column based on group
-        when_expr = None
-        for i, col_name in enumerate(self.score_cols):
-            condition = F.col(self.group_col) == i
-
+        def pick_sort_key(row):
+            group = int(row[self.group_col])
+            if group < 0 or group >= len(self.score_cols):
+                return None
+            col_name = self.score_cols[group]
             if col_name == "__random__":
-                value_expr = F.col(RANDOM_KEY_COL)
-            else:
-                value_expr = F.col(col_name)
+                return row[random_key_col]
+            return row.get(col_name)
 
-            if when_expr is None:
-                when_expr = F.when(condition, value_expr)
-            else:
-                when_expr = when_expr.when(condition, value_expr)
+        work[sort_key_col] = work.apply(pick_sort_key, axis=1)
 
-        score_df = df_with_ids.select(
-            F.col(UUID_COL),
-            F.col(self.group_col),
-            when_expr.otherwise(None).alias(SORT_KEY_COL),
+        total_count = len(work)
+        work[group_count_col] = work.groupby(self.group_col)[self.group_col].transform("count")
+
+        work[rank_col] = (
+            work.groupby(self.group_col)[sort_key_col]
+            .rank(method="first", ascending=self.ascending)
+            .astype(float)
         )
-        logging.info("Step 2: Created score DataFrame with minimal columns")
 
-        # Step 3: Get total count for rescaling
-        try:
-            self.spark.sparkContext.setJobDescription(
-                "InterleavedReorder - Calculate total count"
-            )
-            total_count = df.count()
-            logging.info(f"Step 3: Total row count = {total_count}")
-        finally:
-            self.spark.sparkContext.setJobDescription(None)
-
-        # Step 4: Calculate within-group ranks and rescale
-        window_group_count = Window.partitionBy(self.group_col)
-        sort_expr = (
-            F.col(SORT_KEY_COL).asc() if self.ascending else F.col(SORT_KEY_COL).desc()
-        )
-        window_group_rank = Window.partitionBy(self.group_col).orderBy(sort_expr)
-
-        rescaled_df = (
-            score_df.withColumn(
-                GROUP_COUNT_COL, F.count(F.lit(1)).over(window_group_count)
-            )
-            .withColumn(RANK_COL, F.row_number().over(window_group_rank))
-            .withColumn(
-                RESCALED_RANK_COL,
-                (F.col(RANK_COL) / F.col(GROUP_COUNT_COL)) * F.lit(total_count),
-            )
-        )
+        work[rescaled_rank_col] = (work[rank_col] / work[group_count_col]) * total_count
 
         if self.perturb > 0:
-            rescaled_df = rescaled_df.withColumn(
-                RESCALED_RANK_COL,
-                F.col(RESCALED_RANK_COL) + F.lit(self.perturb) * F.rand(),
+            work[rescaled_rank_col] = work[rescaled_rank_col] + (
+                self.perturb * np.random.rand(len(work))
             )
 
-        logging.info("Step 4: Calculated and rescaled within-group ranks")
+        sorted_df = work.sort_values(
+            by=[rescaled_rank_col, random_key_col], ascending=[True, True]
+        ).reset_index(drop=True)
 
-        # Step 5: Join rescaled ranks back to original DataFrame
-        final_df = df_with_ids.join(
-            rescaled_df.select(UUID_COL, RESCALED_RANK_COL), on=UUID_COL, how="inner"
-        )
-        logging.info("Step 5: Joined rescaled ranks to original data")
+        sorted_df = sorted_df.drop(columns=[uuid_col, random_key_col, sort_key_col, rank_col, group_count_col, rescaled_rank_col])
+        return dataset_from_pandas(sorted_df)
 
-        # Step 6: Sort by rescaled rank to produce interleaved output
-        sorted_df = final_df.orderBy(
-            F.col(RESCALED_RANK_COL).asc(), F.col(RANDOM_KEY_COL).asc()
-        )
-        logging.info("Step 6: Final sort completed")
-
-        # Clean up temporary columns
-        return sorted_df.drop(UUID_COL, RANDOM_KEY_COL, RESCALED_RANK_COL)
-
-    def run(self) -> DataFrame:
-        """
-        Executes the pipeline node to fetch data from children and reorder it.
-
-        Returns:
-            Reordered DataFrame
-
-        Raises:
-            ValueError: If no child nodes are configured
-        """
+    def run(self):
         if not self.children:
             raise ValueError(f"{self.__class__.__name__} node has no child.")
-        if len(self.children) > 1:
-            logging.warning(
-                f"{self.__class__.__name__} expects a single child, "
-                f"but got {len(self.children)}. Only the first child will be processed."
-            )
-
-        df = self.children[0].run()
-        return self.reorder(df)
+        ds = self.children[0].run()
+        return self.reorder(ds)

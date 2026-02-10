@@ -1,56 +1,49 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import rand
-from transformers import AutoTokenizer
 
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import (
+    normalize_lance_path,
+    path_exists,
+    select_columns,
+    union_children,
+)
 from datafiner.register import register
-
-
-def _as_lance_identifier(path: str) -> str:
-    if path.startswith("s3a://"):
-        path = "s3://" + path[len("s3a://") :]
-    if path.startswith("lance."):
-        return path
-    return f"lance.`{path.replace('`', '``')}`"
 
 
 class DataWriter(PipelineNode, ABC):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         output_path: str,
         shuffle: bool = True,
         select_cols: list = None,
         child_configs: list = None,
     ):
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.output_path = output_path
         self.shuffle = shuffle
         self.select_cols = select_cols
 
     @abstractmethod
-    def write(self, df: DataFrame):
+    def write(self, ds):
         pass
 
     def run(self):
-        df_union = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = child.run()
-                df_union = df_union.union(df)
+        ds = union_children(self.children, by_name=False)
         if self.select_cols:
-            df_union = df_union.select(*self.select_cols)
+            ds = select_columns(ds, self.select_cols)
         if self.shuffle:
-            df_union = df_union.orderBy(rand())
-        return self.write(df_union)
+            ds = ds.random_shuffle()
+        return self.write(ds)
 
 
 @register("LanceWriter")
 class LanceWriter(DataWriter):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         output_path: str,
         shuffle: bool = False,
         num_output_files: int = None,
@@ -58,121 +51,90 @@ class LanceWriter(DataWriter):
         mode: str = "overwrite",
         select_cols: list = None,
         child_configs: list = None,
+        storage_options: dict | None = None,
     ):
-        super().__init__(spark, output_path, shuffle, select_cols, child_configs)
+        super().__init__(runtime, output_path, shuffle, select_cols, child_configs)
         self.num_output_files = num_output_files
         self.num_read_partitions = num_read_partitions
         self.mode = mode
+        self.storage_options = storage_options or self.runtime.storage_options
 
-    def _path_exists_and_complete(self) -> bool:
-        """
-        Checks if the target output path exists and is non-empty.
-        """
-        fs = self.spark.sparkContext._jvm.org.apache.hadoop.fs.FileSystem.get(
-            self.spark.sparkContext._jsc.hadoopConfiguration()
-        )
-        hadoop_output_path = self.spark.sparkContext._jvm.org.apache.hadoop.fs.Path(
-            self.output_path
-        )
-        if not fs.exists(hadoop_output_path):
-            return False
-        return len(fs.listStatus(hadoop_output_path)) > 0
+    def _read_existing(self):
+        ds = None
+        try:
+            ds = __import__("ray").data.read_lance(
+                normalize_lance_path(self.output_path),
+                storage_options=self.storage_options,
+            )
+        except Exception:
+            ds = None
 
-    def run(self) -> DataFrame:
-        """
-        Runs the writer. If mode is 'read_if_exists', checks for a cached
-        version before executing the child pipeline.
-        """
-        # 1. Check cache *before* running any children
+        if ds is None:
+            return None
+
+        if self.num_read_partitions is not None and self.num_read_partitions > 0:
+            ds = ds.repartition(self.num_read_partitions)
+        return ds
+
+    def run(self):
         if self.mode == "read_if_exists":
             print(
                 f"[LanceWriter] Mode 'read_if_exists' set. Checking cache: {self.output_path}"
             )
+            existing = self._read_existing()
+            if existing is not None:
+                print("[LanceWriter] Cache hit. Reading from path.")
+                return existing
+            print("[LanceWriter] Cache miss. Proceeding to compute and write.")
 
-            # This check will now raise an error if FS fails
-            if self._path_exists_and_complete():
-                # 2. If HIT: Read from disk and return.
-                print(f"[LanceWriter] Cache hit. Reading from path.")
-
-                # Read the DataFrame from the cached path
-                df_read = self.spark.read.table(_as_lance_identifier(self.output_path))
-
-                if self.num_read_partitions is not None:
-                    print(
-                        f"[LanceWriter] Repartitioning read DataFrame to {self.num_read_partitions} partitions."
-                    )
-                    df_read = df_read.repartition(self.num_read_partitions)
-
-                return df_read
-            else:
-                print(f"[LanceWriter] Cache miss. Proceeding to compute and write.")
-
-        print("[LanceWriter] Computing DataFrame from children...")
-        df_union = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = child.run()
-                df_union = df_union.union(df)
-
+        print("[LanceWriter] Computing dataset from children...")
+        ds = union_children(self.children, by_name=False)
         if self.select_cols:
-            df_union = df_union.select(*self.select_cols)
+            ds = select_columns(ds, self.select_cols)
         if self.shuffle:
-            df_union = df_union.orderBy(rand())
+            ds = ds.random_shuffle()
+        return self.write(ds)
 
-        # 5. Pass the computed DataFrame to the write method to be saved.
-        return self.write(df_union)
-
-    def write(self, df: DataFrame):
-        """
-        Writes the given DataFrame to lance.
-        Assumes the decision to write (vs. read from cache)
-        has already been made by the 'run()' method.
-        """
-
-        # Determine the final write mode.
-        if self.mode == "read_if_exists":
-            final_write_mode = "overwrite"
-        else:
-            final_write_mode = self.mode
-
-        # 2. Repartition (This is for *writing*)
-        if self.num_output_files is not None:
+    def write(self, ds):
+        if self.num_output_files is not None and self.num_output_files > 0:
             print(
-                f"[LanceWriter] Repartitioning DataFrame to {self.num_output_files} partitions."
+                f"[LanceWriter] Repartitioning dataset to {self.num_output_files} blocks for write."
             )
-            df = df.repartition(self.num_output_files)
+            ds = ds.repartition(self.num_output_files)
 
-        # 3. Perform the write
-        print(
-            f"[LanceWriter] Writing data to {self.output_path} (Mode: '{final_write_mode}')"
+        effective_mode = self.mode
+        if self.mode == "read_if_exists":
+            effective_mode = "overwrite"
+
+        if effective_mode == "ignore" and path_exists(self.output_path):
+            print(f"[LanceWriter] Mode 'ignore': target exists, skipping write {self.output_path}")
+            return ds
+
+        ray_mode = {
+            "overwrite": "overwrite",
+            "append": "append",
+            "ignore": "create",
+            "create": "create",
+        }.get(effective_mode, "create")
+
+        print(f"[LanceWriter] Writing data to {self.output_path} (mode={ray_mode})")
+        ds.write_lance(
+            normalize_lance_path(self.output_path),
+            mode=ray_mode,
+            storage_options=self.storage_options,
         )
-        lance_identifier = _as_lance_identifier(self.output_path)
-        writer_v2 = df.writeTo(lance_identifier)
-        if final_write_mode in ("overwrite", "read_if_exists"):
-            writer_v2.using("lance").createOrReplace()
-        elif final_write_mode == "append":
-            writer_v2.append()
-        elif final_write_mode == "ignore":
-            try:
-                writer_v2.using("lance").create()
-            except Exception as exc:
-                if "already exists" not in str(exc).lower():
-                    raise
-        else:
-            writer_v2.using("lance").create()
-
-        return df
+        return ds
 
 
 @register("LanceWriterZstd")
-class LanceWriterZstd(DataWriter):
+class LanceWriterZstd(LanceWriter):
     """
-    Lance writer with Zstd-like tuning options.
+    Lance writer with extra repartition controls.
     """
 
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         output_path: str,
         shuffle: bool = False,
         num_output_files: int = None,
@@ -183,96 +145,29 @@ class LanceWriterZstd(DataWriter):
         compression_level: int = 9,
         use_coalesce: bool = False,
         merge_count: int = 128,
+        storage_options: dict | None = None,
     ):
-        super().__init__(spark, output_path, shuffle, select_cols, child_configs)
-        self.num_output_files = num_output_files
-        self.num_read_partitions = num_read_partitions
-        self.mode = mode
+        super().__init__(
+            runtime,
+            output_path,
+            shuffle,
+            num_output_files,
+            num_read_partitions,
+            mode,
+            select_cols,
+            child_configs,
+            storage_options,
+        )
         self.compression_level = compression_level
         self.use_coalesce = use_coalesce
         self.merge_count = merge_count
 
-    def _path_exists_and_complete(self) -> bool:
-        fs = self.spark.sparkContext._jvm.org.apache.hadoop.fs.FileSystem.get(
-            self.spark.sparkContext._jsc.hadoopConfiguration()
-        )
-        hadoop_output_path = self.spark.sparkContext._jvm.org.apache.hadoop.fs.Path(
-            self.output_path
-        )
-        if not fs.exists(hadoop_output_path):
-            return False
-        return len(fs.listStatus(hadoop_output_path)) > 0
+    def write(self, ds):
+        # Ray Data does not expose coalesce semantics directly, so we model it with repartition.
+        if self.use_coalesce and self.num_output_files is not None and self.num_output_files > 0:
+            ds = ds.repartition(self.num_output_files, shuffle=False)
+        elif self.use_coalesce:
+            target = max(1, int(ds.num_blocks() / max(self.merge_count, 1)))
+            ds = ds.repartition(target, shuffle=False)
 
-    def run(self) -> DataFrame:
-        if self.mode == "read_if_exists":
-            print(
-                f"[LanceWriterZstd] Mode 'read_if_exists' set. Checking cache: {self.output_path}"
-            )
-
-            if self._path_exists_and_complete():
-                print(f"[LanceWriterZstd] Cache hit. Reading from path.")
-                df_read = self.spark.read.table(_as_lance_identifier(self.output_path))
-
-                if self.num_read_partitions is not None:
-                    print(
-                        f"[LanceWriterZstd] Repartitioning read DataFrame to {self.num_read_partitions} partitions."
-                    )
-                    df_read = df_read.repartition(self.num_read_partitions)
-
-                return df_read
-            else:
-                print(
-                    f"[LanceWriterZstd] Cache miss. Proceeding to compute and write."
-                )
-
-        print("[LanceWriterZstd] Computing DataFrame from children...")
-        df_union = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = child.run()
-                df_union = df_union.union(df)
-
-        if self.select_cols:
-            df_union = df_union.select(*self.select_cols)
-        if self.shuffle:
-            df_union = df_union.orderBy(rand())
-
-        return self.write(df_union)
-
-    def write(self, df: DataFrame):
-        if self.mode == "read_if_exists":
-            final_write_mode = "overwrite"
-        else:
-            final_write_mode = self.mode
-
-        if self.use_coalesce:
-            if self.num_output_files is not None:
-                df = df.coalesce(self.num_output_files)
-            else:
-                current_partitions = df.rdd.getNumPartitions()
-                target_partitions = max(1, current_partitions // self.merge_count)
-                df = df.coalesce(target_partitions)
-        else:
-            if self.num_output_files is not None:
-                df = df.repartition(self.num_output_files)
-
-        print(
-            f"[LanceWriterZstd] Writing data in Lance format to {self.output_path}"
-        )
-
-        lance_identifier = _as_lance_identifier(self.output_path)
-        writer_v2 = df.writeTo(lance_identifier)
-        if final_write_mode in ("overwrite", "read_if_exists"):
-            writer_v2.using("lance").createOrReplace()
-        elif final_write_mode == "append":
-            writer_v2.append()
-        elif final_write_mode == "ignore":
-            try:
-                writer_v2.using("lance").create()
-            except Exception as exc:
-                if "already exists" not in str(exc).lower():
-                    raise
-        else:
-            writer_v2.using("lance").create()
-
-        return df
+        return super().write(ds)

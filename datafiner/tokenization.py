@@ -1,8 +1,8 @@
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.types import ArrayType, IntegerType
+import pandas as pd
 from transformers import AutoTokenizer
+
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import union_children
 from datafiner.register import register
 
 
@@ -10,33 +10,34 @@ from datafiner.register import register
 class Tokenization(PipelineNode):
     def __init__(
         self,
-        spark: SparkSession,
+        runtime,
         tokenizer_name_or_path: str,
         input_col: str = "text",
         output_col: str = "text_tokenized",
         child_configs: list = None,
     ) -> None:
-        super().__init__(spark, child_configs)
+        super().__init__(runtime, child_configs)
         self.tokenizer_name_or_path = tokenizer_name_or_path
         self.input_col = input_col
         self.output_col = output_col
 
     def run(self):
-        df = self.children[0].run()
-        if len(self.children) > 1:
-            for child in self.children[1:]:
-                df = df.union(child.run())
-        return self.tokenize(df)
+        ds = union_children(self.children, by_name=False)
+        return self.tokenize(ds)
 
-    def tokenize(self, df: DataFrame) -> DataFrame:
+    def tokenize(self, ds):
         tokenizer_name_or_path = self.tokenizer_name_or_path
 
-        def encode_udf(text):
-            if not hasattr(encode_udf, "tokenizer"):
-                encode_udf.tokenizer = AutoTokenizer.from_pretrained(
+        def encode_batch(batch: pd.DataFrame) -> pd.DataFrame:
+            if not hasattr(encode_batch, "tokenizer"):
+                encode_batch.tokenizer = AutoTokenizer.from_pretrained(
                     tokenizer_name_or_path
                 )
-            return encode_udf.tokenizer.encode(text)
 
-        func = F.udf(encode_udf, ArrayType(IntegerType()))
-        return df.withColumn(self.output_col, func(F.col(self.input_col)))
+            out = batch.copy()
+            out[self.output_col] = out[self.input_col].fillna("").map(
+                lambda x: encode_batch.tokenizer.encode(str(x))
+            )
+            return out
+
+        return ds.map_batches(encode_batch, batch_format="pandas")
