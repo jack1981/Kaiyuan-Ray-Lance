@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: sample
 pipeline:
   type: Flatten
@@ -11,5 +11,5 @@ pipeline:
           max_sample: 20.0
           child_configs:
             - type: LanceReader
-              input_path: "/data/sample/dclm_subset_dedup.lance"
+              input_path: "data/sample/dclm_subset_dedup.lance"
               num_parallel: 2

@@ -1,360 +1,173 @@
-# Kaiyuan Spark
+# Kaiyuan Ray + Lance
 
 [![License](https://img.shields.io/badge/License-Apache-f5de53?&color=f5de53)](LICENSE)
 [![arXiv-2512.07612](https://img.shields.io/badge/arXiv-2512.07612-b31b1b.svg?style=flat)](https://arxiv.org/abs/2512.07612)
 
-A scalable data preprocessing framework built on PySpark for [PCMind-2.1-Kaiyuan-2B](https://huggingface.co/thu-pacman/PCMind-2.1-Kaiyuan-2B), a leading fully open-source language model with 2B total parameters (1.4B non-embedding parameters).
+A tree-structured data preprocessing framework migrated from Spark to Ray Data with Lance I/O.
 
-## Overview
+## Migration Summary
 
-This framework provides a tree-structured pipeline framework for large-scale data preprocessing, where input files serve as leaf nodes and the final output as the root. The design emphasizes:
+This branch removes Spark/Yarn runtime paths and replaces them with:
 
-- **User-friendly**: Declarative YAML-based configuration
-- **Scalable**: Built on PySpark for distributed processing
-- **Modular**: Extensible pipeline nodes for custom operations
-- **Production-ready**: Supports both local development and YARN cluster deployment
+- Ray local mode (`ray.init()` on developer laptop / Docker)
+- Ray Kubernetes mode (KubeRay `RayCluster` + Kubernetes Job submit)
+- Ray-native transforms (`map_batches`, `random_shuffle`, dataset-level operations)
+- Lance I/O through Ray Data (`read_lance`, `write_lance`)
 
-## Lance-Spark Integration (This Branch)
+## Spark to Ray Mapping
 
-This branch migrates local Spark I/O to [Lance](https://lancedb.github.io/lance/) via `lance-spark` on Spark `3.5.8`.
+| Previous Spark Component | New Ray Component |
+| --- | --- |
+| `SparkSession` bootstrap | `ray.init()` via `PipelineTree` |
+| Spark DataFrame nodes | Ray Data `Dataset` nodes |
+| Spark UDF / pandas UDF | `Dataset.map_batches` |
+| `spark-submit` local mode | `python main.py --mode local` |
+| Spark-on-K8s submit | Kubernetes Job + `--mode k8s --ray-address` |
+| Spark Lance catalog | Ray Data `read_lance` / `write_lance` |
+| Legacy non-Ray cluster mode | Removed |
 
-- **Spark local mode in Docker uses Lance tables** for read/write operations.
-- **Example assets are prepared as `.lance` datasets** under `data/sample/`.
-- **Pipeline node names are Lance-first** (`LanceReader`, `LanceWriter`) across examples and configs in this branch.
-- **Refactoring scope**: runtime bootstrap (`Dockerfile`, `docker-compose.yml`, `script/run_local.sh`), sample preparation (`script/prepare_local_sample.py`), and DataFrame I/O paths (`datafiner/data_reader.py`, `datafiner/data_writer.py`, `datafiner/splitter.py`).
-
-## Quick Start
-
-### Environment Setup
-
-Please [deploy Spark](https://spark.apache.org/docs/latest/quick-start.html) on your server first. Then install the Python dependencies:
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Run Example Pipeline
-
-Modify the paths accordingly in `example/read_write.yaml` and execute:
+## CLI
 
 ```bash
-bash script/run_yarn.sh main.py example/read_write.yaml
+python main.py --config <config.yaml> --mode local|k8s [--ray-address ray://...]
 ```
 
-This basic pipeline demonstrates reading data and writing results through the configured pipeline I/O path.
+- `--mode local`: starts a local Ray runtime if no address is supplied.
+- `--mode k8s`: connects to a remote Ray cluster using `--ray-address`, `ray.address` config, `RAY_ADDRESS`, or default `ray://raycluster-kaiyuan-head-svc:10001`.
 
-_Note: We do not provide any dataset in this repository. You need to acquire the datasets according to their names._
+## Local Run (Laptop / Docker)
 
-## Docker + Kubernetes (Local Laptop)
+### 1) Build image
 
-The project image is pinned to Spark `3.5.8` and `lance-spark` integration.
-
-This branch supports:
-
-- Docker local mode (`master=local[*]`)
-- Spark-on-Kubernetes cluster mode on a local kind cluster (1 driver + 2 executors by default)
-
-For YARN usage, continue to use `script/run_yarn.sh` outside Docker/K8s.
-
-### Build Base Image
 ```bash
 make build
 ```
 
-### Prepare Local Lance Sample + Models
+### 2) Prepare local sample Lance datasets + models
+
 ```bash
 make prepare-sample
 ```
-`make prepare-sample` is offline-safe and uses synthetic local data only.
 
-### Prepare Assets For All `example/*.yaml`
-```bash
-make prepare-examples
-```
+### 3) Run end-to-end example (read -> transform -> write)
 
-### Run (Default Example)
 ```bash
 make run
 ```
 
-### Run All Example Configs
+Default example is `example/read_write.yaml`.
+
+### 4) Run all examples
+
 ```bash
 make run-examples
 ```
 
-### Run Local (Custom Config)
-```bash
-PIPELINE_CONFIG=/workspace/<path>.yaml make run
-```
+## Kubernetes Run (KubeRay)
 
-Optional sample size override:
-```bash
-SAMPLE_ROWS=500 make prepare-sample
-```
+### 1) Bring up kind + MinIO + KubeRay + RayCluster
 
-Optional offline prep (skip Hugging Face download):
-```bash
-SOURCE_MODE=synthetic make prepare-examples
-```
-
-Use Hugging Face source explicitly (may download large files):
-```bash
-make prepare-sample-hf
-```
-
-Check Spark version in container:
-```bash
-make spark-version
-```
-
-### Kubernetes Cluster Mode (kind on macOS)
-
-Boot local Kubernetes, deploy MinIO, and load the Spark image:
 ```bash
 make k8s-up
 ```
 
-Prepare and upload all example assets (`.lance` + model files) to MinIO:
+This applies:
+
+- `k8s/base/*` (namespace, RBAC, MinIO)
+- KubeRay operator manifest
+- `k8s/kuberay/raycluster.yaml`
+
+### 2) Prepare and upload sample assets to MinIO
+
 ```bash
 make k8s-prepare
 ```
 
-Run the default example in Spark-on-K8s cluster mode:
+### 3) Submit pipeline to cluster
+
 ```bash
 make k8s-run
 ```
 
-Run all examples in Spark-on-K8s cluster mode:
+Equivalent direct submit:
+
+```bash
+K8S_NAMESPACE=kaiyuan-ray \
+RAY_JOB_IMAGE=kaiyuan-ray-app:latest \
+RAY_ADDRESS=ray://raycluster-kaiyuan-head-svc:10001 \
+bash script/run_k8s.sh main.py example/read_write.yaml
+```
+
+### 4) Run all example configs on cluster
+
 ```bash
 make k8s-run-examples
 ```
 
-Deploy/refresh Spark History Server (for completed application UIs):
-```bash
-make k8s-history-up
-```
+### 5) Tear down kind cluster
 
-Open Spark History Server UI locally:
-```bash
-make k8s-history-ui
-```
-Then visit `http://localhost:18080`.
-
-### Cluster UI Access
-
-Kubernetes Dashboard (cluster nodes, pods, jobs):
-```bash
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-kubectl apply -f k8s/base/dashboard-admin.yaml
-kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 10443:443
-```
-In another terminal, generate a login token:
-```bash
-kubectl -n kubernetes-dashboard create token admin-user --duration=24h
-```
-Open `https://localhost:10443` and sign in with the token.
-
-If Dashboard looks empty, switch namespace to `kaiyuan-spark` (or `All namespaces`).
-
-Spark live UI (running application):
-```bash
-bash script/run_k8s.sh main.py example/read_write.yaml
-```
-In another terminal:
-```bash
-svc=$(kubectl -n kaiyuan-spark get svc -o name | rg 'driver-svc' | tail -n1)
-kubectl -n kaiyuan-spark port-forward "${svc}" 4040:4040
-```
-Open `http://localhost:4040`.
-
-Delete local kind cluster:
 ```bash
 make k8s-down
 ```
 
-K8s notes:
+## Example Config
 
-- The same Docker image is used by submitter, driver, and executors.
-- Default cluster simulation is `1` driver pod and `2` executor pods (`K8S_EXECUTOR_INSTANCES=2`).
-- Example YAMLs are rewritten at submit time from `/data/sample/*.lance` and `/data/output/*.lance` to `s3a://<bucket>/sample/*.lance` and `s3a://<bucket>/output/*.lance`.
-- FastText and sequence-classifier model assets are distributed via Spark `--files` and `--archives`.
-- Spark event logs are enabled by default in K8s mode (`s3a://<bucket>/spark-events`) so finished apps appear in Spark History Server.
-- For migration to a real K8s cluster, replace image/pull policy/storage endpoint env vars in `.env` and reuse `script/run_k8s.sh`.
-
-## Framework Architecture
-
-### Core Components (`datafiner/`)
-
-The framework provides a comprehensive set of pipeline nodes. Some examples:
-
-| Component           | File                       | Description                                                            |
-| ------------------- | -------------------------- | ---------------------------------------------------------------------- |
-| **Base Structure**  | `base.py`                  | Abstract classes for custom node implementation                        |
-| **Filtering**       | `filter.py`                | Quality-based data filtering with configurable thresholds              |
-| **Selection**       | `selector.py`              | Column selection and data projection                                   |
-| **Sorting**         | `reorder.py`               | Single and multi-level sorting operations                              |
-| **Deduplication**   | `deduplication/minhash.py` | MinHash-based near-duplicate detection                                 |
-| **Group Mixing**    | `group_reorder.py`         | Stratified data mixing (see [paper](https://arxiv.org/abs/2512.07612)) |
-| **Quality Scoring** | `text_scorer.py`           | FastText-based text quality assessment                                 |
-| **I/O Operations**  | `data_reader.py`, `data_writer.py`   | Lance-backed table I/O (local), plus JSON and custom format support                               |
-
-Other specific pipeline nodes definition can see `datafiner/`. All nodes inherit from base classes in `base.py`, making it straightforward to implement custom operations.
-
-### Example Configurations (`example/`)
-
-Starter templates for common operations. Some examples:
-
-- **`read_write.yaml`**: Basic I/O pipeline (read/write over local Lance sample data)
-- **`dedup.yaml`**: Deduplication pipeline using MinHash
-- **`filter.yaml`**: Quality filtering based on score metrics
-- **`reorder.yaml`**: Data sorting and shuffling examples
-
-Other specific pipeline nodes definition can see `example/`.
-
-### Execution Scripts (`script/`)
-
-Two deployment modes supported:
-
-- **`run_local.sh`**: Local mode for development and testing
-- **`run_yarn.sh`**: YARN cluster mode for production workloads
-
-## Production Configuration (`configs/`)
-
-This directory contains the complete preprocessing pipeline used for PCMind-2.1-Kaiyuan-2B training data. The configuration is organized by processing stage:
-
-### 1. Data Cleaning (`clean_filter/`)
-
-Chinese text cleaning pipeline removing:
-
-- Toxic content
-- Slang and informal language
-- Low-quality advertisements
-
-### 2. Deduplication (`dedup/`)
-
-Near-duplicate removal for major datasets:
-
-- **DCLM-Baseline**: Deduplication of base training corpus
-- **Fineweb-Edu-Chinese-V2.1**: Educational content deduplication
-- **FinePDF**: Document-level deduplication
-
-### 3. Quantile Selection (`quantile/`)
-
-Score-based data sampling around target quality percentiles
-
-### 4. Tokenization (`tokenization/`)
-
-Tokenization pipelines for various source datasets (JSON, Lance)
-
-### 5. Phase Construction (`phases/`)
-
-Multi-phase training data preparation:
-
-- **`mix.yaml`**: Data mixing strategies per training phase
-- **`count.yaml`**: Token counting and statistics
-
-### 6. Detokenization (`detokenization/`)
-
-Converting tokenized data back to text format for analysis
-
-These configurations provide a **complete recipe** for reproducing the PCMind-2.1-Kaiyuan-2B training pipeline. Use them as reference for building custom preprocessing workflows.
-
-## Usage
-
-You can modify the environment variables in the following scripts to suit your needs.
-
-### YARN Cluster Mode (Production)
-
-```bash
-bash script/run_yarn.sh main.py /path/to/config.yaml
-```
-
-### Local Mode (Development)
-
-```bash
-bash script/run_local.sh main.py /path/to/config.yaml
-```
-
-### Configuration File Structure
-
-Example pipeline configuration:
+`example/read_write.yaml`:
 
 ```yaml
-spark:
-  app_name: my_preprocessing_pipeline
-
+ray:
+  app_name: read_write
 pipeline:
   type: LanceWriter
-  output_path: /output/path.lance
+  output_path: /data/output/read_write.lance
   child_configs:
-    - type: Filter
-      filter_col: quality_score
-      threshold: 0.7
-      child_configs:
-        - type: LanceReader
-          input_path: /input/path.lance
+    - type: LanceReader
+      input_path: "/data/sample/pcmind_kaiyuan_2b_sample.lance"
 ```
 
-Pipelines are defined as trees where:
+## Lance I/O Notes
 
-- **Leaf nodes**: Data readers (LanceReader, JsonReader, etc.)
-- **Internal nodes**: Transformations (Filter, Dedup, Reorder, etc.)
-- **Root node**: Data writers (LanceWriter, etc.)
+- Reader/writer paths support local and object-store URIs (`s3://...`, `s3a://...`).
+- `s3a://` is normalized to `s3://` for Lance APIs.
+- Runtime object-store options can be provided by:
+  - `ray.storage_options` in config
+  - `LANCE_STORAGE_OPTIONS_JSON`
+  - AWS/MinIO env vars (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, etc.)
 
-## Advanced Features
+## Compatibility Notes (Spark-Lance -> Ray-Lance)
 
-### Custom Pipeline Nodes
+- Dataset format remains Lance.
+- Writer mode mapping:
+  - Spark `overwrite` -> Ray `overwrite`
+  - Spark `append` -> Ray `append`
+  - Spark `ignore` -> Ray `create` if target does not exist
+  - Spark `read_if_exists` -> read existing Lance dataset, else compute + overwrite
+- Partition control now maps to Ray dataset repartition before Lance writes.
 
-Extend the framework by inheriting from `PipelineNode`:
+## Troubleshooting
 
-```python
-from datafiner.base import PipelineNode
-from datafiner.register import register
+- Ray address connection failures:
+  - Verify Ray head service is reachable: `ray://raycluster-kaiyuan-head-svc:10001`
+  - Check cluster pods: `kubectl -n kaiyuan-ray get pods`
+- Image pull failures on kind:
+  - Re-load local image: `kind load docker-image kaiyuan-ray-app:latest --name kaiyuan-ray`
+- Kubernetes permission errors:
+  - Ensure `k8s/base/rbac.yaml` is applied and Job uses `ray-job-runner`
+- MinIO endpoint issues:
+  - For host access in Docker, use `host.docker.internal:30900`
+  - For in-cluster access, use `http://minio.kaiyuan-ray.svc.cluster.local:9000`
 
-@register("CustomNode")
-class CustomNode(PipelineNode):
-    def __init__(self, spark, custom_param, child_configs=None):
-        super().__init__(spark, child_configs)
-        self.custom_param = custom_param
+## Development Layout
 
-    def run(self):
-        df = self.children[0].run()
-        # Your custom logic here
-        return transformed_df
-```
-
-## Citation
-
-If you use this framework in your research, please cite:
-
-```bibtex
-@article{luo2025pcmind21kaiyuan2btechnicalreport,
-  title={PCMind-2.1-Kaiyuan-2B Technical Report},
-  author={Kairong Luo and Zhenbo Sun and Xinyu Shi and Shengqi Chen and Bowen Yu anYunyi Chen and Chenyi Dang and Hengtao Tao and Hui Wang and Fangming Liu and KaifenLyu and Wenguang Chen},
-  year={2025},
-  eprint={2512.07612},
-  archivePrefix={arXiv},
-  primaryClass={cs.CL},
-  url={https://arxiv.org/abs/2512.07612},
-}
-```
-
-## License
-
-This repository is licensed under [Apache-2.0 License](LICENSE) with the following copyright notice:
-
-```text
-Copyright 2025 Tsinghua University & Peng Cheng Laboratory
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
+- Pipeline runtime: `main.py`, `datafiner/base.py`
+- I/O nodes: `datafiner/data_reader.py`, `datafiner/data_writer.py`
+- Transform/filter/dedup nodes: `datafiner/*.py`, `datafiner/deduplication/*.py`
+- Local/K8s scripts: `script/*.sh`, `script/*.py`
+- KubeRay manifests: `k8s/kuberay/*.yaml`
+- Example configs: `example/*.yaml`

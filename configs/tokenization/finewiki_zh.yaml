@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: finewiki_zh-tokens
 pipeline:
   type: LanceWriter

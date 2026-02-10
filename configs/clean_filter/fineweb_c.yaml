@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: fineweb_chinese_dedup_cleaned
 pipeline:
   type: LanceWriter

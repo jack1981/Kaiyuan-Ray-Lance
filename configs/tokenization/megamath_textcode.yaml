@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: megamath-text-code-block_tokens
 pipeline:
   type: LanceWriter

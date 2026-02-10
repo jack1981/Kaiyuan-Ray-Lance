@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: decay_v2
 pipeline:
   type: LanceWriter

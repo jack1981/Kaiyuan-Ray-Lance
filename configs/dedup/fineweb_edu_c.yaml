@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: fineweb_edu_c_dedup
 pipeline:
   type: LanceWriter

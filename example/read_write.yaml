@@ -1,8 +1,8 @@
-spark:
+ray:
   app_name: read_write
 pipeline:
   type: LanceWriter
-  output_path: /data/output/read_write.lance
+  output_path: data/output/read_write.lance
   child_configs:
     - type: LanceReader
-      input_path: "/data/sample/pcmind_kaiyuan_2b_sample.lance"
+      input_path: "data/sample/pcmind_kaiyuan_2b_sample.lance"

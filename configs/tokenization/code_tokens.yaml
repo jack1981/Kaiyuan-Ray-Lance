@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: starcoder_tokens_v0
 pipeline:
   type: LanceWriter

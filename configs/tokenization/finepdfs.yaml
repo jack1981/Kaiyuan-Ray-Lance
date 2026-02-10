@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: finepdfs_tokens
 pipeline:
   type: LanceWriter

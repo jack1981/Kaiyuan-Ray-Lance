@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: filter
 pipeline:
   type: Visualizer
@@ -11,5 +11,5 @@ pipeline:
       keep_ratio: 0.2
       child_configs:
         - type: LanceReader
-          input_path: "/data/sample/scored_input.lance"
+          input_path: "data/sample/scored_input.lance"
           num_parallel: 2

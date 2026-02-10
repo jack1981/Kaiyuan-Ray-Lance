@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: shuffle
 pipeline:
   type: Visualizer
@@ -8,5 +8,5 @@ pipeline:
     - type: Shuffler
       child_configs:
         - type: LanceReader
-          input_path: "/data/sample/scored_input.lance"
+          input_path: "data/sample/scored_input.lance"
           num_parallel: 2

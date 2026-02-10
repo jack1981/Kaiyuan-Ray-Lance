@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: flan-tokens
 pipeline:
   type: LanceWriter

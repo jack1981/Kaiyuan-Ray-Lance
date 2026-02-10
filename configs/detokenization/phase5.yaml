@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: phase5_detokenization
 pipeline:
   type: LanceWriterZstd

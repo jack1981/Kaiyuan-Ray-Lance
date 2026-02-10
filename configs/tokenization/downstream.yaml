@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: downstream_tokens
 pipeline:
   type: LanceWriter

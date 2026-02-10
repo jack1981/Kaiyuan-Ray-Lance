@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: main_mix_v3_cma
 pipeline:
   type: LanceWriter

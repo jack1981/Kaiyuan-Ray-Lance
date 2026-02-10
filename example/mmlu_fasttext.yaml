@@ -1,15 +1,15 @@
-spark:
+ray:
   app_name: mmlu_fasttext
 pipeline:
   type: LanceWriter
-  output_path: "/data/output/mmlu_filtered_g0l0.lance"
+  output_path: "data/output/mmlu_filtered_g0l0.lance"
   child_configs:
     - type: FastTextFilter
-      model_path: "/data/models/fasttext_mmlu.bin"
+      model_path: "data/models/fasttext_mmlu.bin"
       num_labels: 2
       threshold: 0.03
       selected_label: "__label__mmlu_"
       child_configs:
         - type: LanceReader
-          input_path: "/data/sample/scored_input.lance"
+          input_path: "data/sample/scored_input.lance"
           num_parallel: 2

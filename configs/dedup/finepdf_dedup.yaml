@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: finepdf_dedup
 pipeline:
   type: LanceWriter

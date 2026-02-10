@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: decay_v2_p4_cma_count
 pipeline:
   type: LanceWriter

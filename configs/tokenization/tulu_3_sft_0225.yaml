@@ -1,4 +1,4 @@
-spark:
+ray:
   app_name: tulu-3-sft-0225-tokens
 pipeline:
   type: LanceWriter
