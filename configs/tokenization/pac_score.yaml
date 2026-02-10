@@ -1,7 +1,7 @@
 spark:
   app_name: ZH_dedup_global_pac_score
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/cn_dataset/tokens/ZH_dedup_global_pac_score
   shuffle: true
   select_cols: ["text_tokenized", "pac_score", "duplicate_count"]
@@ -22,5 +22,5 @@ pipeline:
               keep_ratio: 0.30
               quantile_error: 0.01
               child_configs:
-                - type: ParquetReader
+                - type: LanceReader
                   input_path: /home/dataset/cn_dataset/parquets/ZH_dedup_global

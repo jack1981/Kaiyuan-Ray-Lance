@@ -1,7 +1,7 @@
 spark:
   app_name: finemath_tokens
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: False
   mode: overwrite
   select_cols: ["text_tokenized", "token_count", "char_count", "url", "score"]
@@ -12,5 +12,5 @@ pipeline:
       output_col: "text_tokenized"
       tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/dataset/math_dataset/parquets/finemath/finemath-4plus/

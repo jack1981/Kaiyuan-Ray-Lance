@@ -1,7 +1,7 @@
 spark:
   app_name: aligned_zh2en
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: False
   mode: overwrite
   select_cols: ["text_tokenized"]
@@ -16,5 +16,5 @@ pipeline:
           select_cols: ["src_text", "dst_text"]
           output_col: "text"
           child_configs:
-            - type: ParquetReader
+            - type: LanceReader
               input_path: /home/dataset/cn_dataset/parquets/undl_zh2en_aligned

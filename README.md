@@ -20,7 +20,7 @@ This branch migrates local Spark I/O to [Lance](https://lancedb.github.io/lance/
 
 - **Spark local mode in Docker uses Lance tables** for read/write operations.
 - **Example assets are prepared as `.lance` datasets** under `data/sample/`.
-- **Pipeline node names remain stable** (`ParquetReader`, `ParquetWriter`) for config compatibility, but they are refactored to Lance-backed reads/writes in local Docker flow.
+- **Pipeline node names are Lance-first** (`LanceReader`, `LanceWriter`) across examples and configs in this branch.
 - **Refactoring scope**: runtime bootstrap (`Dockerfile`, `docker-compose.yml`, `script/run_local.sh`), sample preparation (`script/prepare_local_sample.py`), and DataFrame I/O paths (`datafiner/data_reader.py`, `datafiner/data_writer.py`, `datafiner/splitter.py`).
 
 ## Quick Start
@@ -211,22 +211,22 @@ spark:
   app_name: my_preprocessing_pipeline
 
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /output/path.lance
   child_configs:
     - type: Filter
       filter_col: quality_score
       threshold: 0.7
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /input/path.lance
 ```
 
 Pipelines are defined as trees where:
 
-- **Leaf nodes**: Data readers (ParquetReader/LanceReader, JsonReader, etc.)
+- **Leaf nodes**: Data readers (LanceReader, JsonReader, etc.)
 - **Internal nodes**: Transformations (Filter, Dedup, Reorder, etc.)
-- **Root node**: Data writers (ParquetWriter/LanceWriter, etc.)
+- **Root node**: Data writers (LanceWriter, etc.)
 
 ## Advanced Features
 

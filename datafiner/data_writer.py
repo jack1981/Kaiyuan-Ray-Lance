@@ -44,8 +44,8 @@ class DataWriter(PipelineNode, ABC):
         return self.write(df_union)
 
 
-@register("ParquetWriter")
-class ParquetWriter(DataWriter):
+@register("LanceWriter")
+class LanceWriter(DataWriter):
     def __init__(
         self,
         spark: SparkSession,
@@ -84,28 +84,28 @@ class ParquetWriter(DataWriter):
         # 1. Check cache *before* running any children
         if self.mode == "read_if_exists":
             print(
-                f"[ParquetWriter] Mode 'read_if_exists' set. Checking cache: {self.output_path}"
+                f"[LanceWriter] Mode 'read_if_exists' set. Checking cache: {self.output_path}"
             )
 
             # This check will now raise an error if FS fails
             if self._path_exists_and_complete():
                 # 2. If HIT: Read from disk and return.
-                print(f"[ParquetWriter] Cache hit. Reading from path.")
+                print(f"[LanceWriter] Cache hit. Reading from path.")
 
                 # Read the DataFrame from the cached path
                 df_read = self.spark.read.table(_as_lance_identifier(self.output_path))
 
                 if self.num_read_partitions is not None:
                     print(
-                        f"[ParquetWriter] Repartitioning read DataFrame to {self.num_read_partitions} partitions."
+                        f"[LanceWriter] Repartitioning read DataFrame to {self.num_read_partitions} partitions."
                     )
                     df_read = df_read.repartition(self.num_read_partitions)
 
                 return df_read
             else:
-                print(f"[ParquetWriter] Cache miss. Proceeding to compute and write.")
+                print(f"[LanceWriter] Cache miss. Proceeding to compute and write.")
 
-        print("[ParquetWriter] Computing DataFrame from children...")
+        print("[LanceWriter] Computing DataFrame from children...")
         df_union = self.children[0].run()
         if len(self.children) > 1:
             for child in self.children[1:]:
@@ -122,7 +122,7 @@ class ParquetWriter(DataWriter):
 
     def write(self, df: DataFrame):
         """
-        Writes the given DataFrame to parquet.
+        Writes the given DataFrame to lance.
         Assumes the decision to write (vs. read from cache)
         has already been made by the 'run()' method.
         """
@@ -136,13 +136,13 @@ class ParquetWriter(DataWriter):
         # 2. Repartition (This is for *writing*)
         if self.num_output_files is not None:
             print(
-                f"[ParquetWriter] Repartitioning DataFrame to {self.num_output_files} partitions."
+                f"[LanceWriter] Repartitioning DataFrame to {self.num_output_files} partitions."
             )
             df = df.repartition(self.num_output_files)
 
         # 3. Perform the write
         print(
-            f"[ParquetWriter] Writing data to {self.output_path} (Mode: '{final_write_mode}')"
+            f"[LanceWriter] Writing data to {self.output_path} (Mode: '{final_write_mode}')"
         )
         lance_identifier = _as_lance_identifier(self.output_path)
         writer_v2 = df.writeTo(lance_identifier)
@@ -162,10 +162,10 @@ class ParquetWriter(DataWriter):
         return df
 
 
-@register("ParquetWriterZstd")
-class ParquetWriterZstd(DataWriter):
+@register("LanceWriterZstd")
+class LanceWriterZstd(DataWriter):
     """
-    Parquet writer with Zstd compression at level 9.
+    Lance writer with Zstd-like tuning options.
     """
 
     def __init__(
@@ -204,26 +204,26 @@ class ParquetWriterZstd(DataWriter):
     def run(self) -> DataFrame:
         if self.mode == "read_if_exists":
             print(
-                f"[ParquetWriterZstd] Mode 'read_if_exists' set. Checking cache: {self.output_path}"
+                f"[LanceWriterZstd] Mode 'read_if_exists' set. Checking cache: {self.output_path}"
             )
 
             if self._path_exists_and_complete():
-                print(f"[ParquetWriterZstd] Cache hit. Reading from path.")
+                print(f"[LanceWriterZstd] Cache hit. Reading from path.")
                 df_read = self.spark.read.table(_as_lance_identifier(self.output_path))
 
                 if self.num_read_partitions is not None:
                     print(
-                        f"[ParquetWriterZstd] Repartitioning read DataFrame to {self.num_read_partitions} partitions."
+                        f"[LanceWriterZstd] Repartitioning read DataFrame to {self.num_read_partitions} partitions."
                     )
                     df_read = df_read.repartition(self.num_read_partitions)
 
                 return df_read
             else:
                 print(
-                    f"[ParquetWriterZstd] Cache miss. Proceeding to compute and write."
+                    f"[LanceWriterZstd] Cache miss. Proceeding to compute and write."
                 )
 
-        print("[ParquetWriterZstd] Computing DataFrame from children...")
+        print("[LanceWriterZstd] Computing DataFrame from children...")
         df_union = self.children[0].run()
         if len(self.children) > 1:
             for child in self.children[1:]:
@@ -255,7 +255,7 @@ class ParquetWriterZstd(DataWriter):
                 df = df.repartition(self.num_output_files)
 
         print(
-            f"[ParquetWriterZstd] Writing data in Lance format to {self.output_path}"
+            f"[LanceWriterZstd] Writing data in Lance format to {self.output_path}"
         )
 
         lance_identifier = _as_lance_identifier(self.output_path)
@@ -275,7 +275,3 @@ class ParquetWriterZstd(DataWriter):
 
         return df
 
-
-@register("LanceWriter")
-class LanceWriter(ParquetWriter):
-    pass

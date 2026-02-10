@@ -1,7 +1,7 @@
 spark:
   app_name: openwebmath_tokens
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: False
   mode: overwrite
   select_cols: ["text_tokenized", "meta"]
@@ -16,6 +16,6 @@ pipeline:
           input_col: metadata
           output_col: meta
           child_configs:
-            - type: ParquetReader
+            - type: LanceReader
               input_path: /home/dataset/math_dataset/parquets/open-web-math
               mergeSchema: false

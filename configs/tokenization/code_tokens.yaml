@@ -1,7 +1,7 @@
 spark:
   app_name: starcoder_tokens_v0
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/kaiyuan/v0/starcoder_tokens
   shuffle: true
   select_cols: ["text_tokenized", "max_stars_repo_path", "max_stars_repo_name", "max_stars_count", "id"]
@@ -12,6 +12,6 @@ pipeline:
       output_col: "text_tokenized"
       tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/dataset/starcoderdata_parquet/
           num_parallel: 128

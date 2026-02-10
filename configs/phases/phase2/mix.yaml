@@ -2,7 +2,7 @@ spark:
   app_name: main_mix_v2
 
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/kaiyuan/v2/stable_phase_v2
   select_cols: ["text_tokenized"]
   shuffle: true
@@ -27,7 +27,7 @@ pipeline:
           input_col: "text_tokenized"
           drop_intermediate: True
           child_configs:
-          - type: ParquetReader
+          - type: LanceReader
             input_path: /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
             select_cols: ["text_tokenized", "score"]
   ## finewiki-zh
@@ -38,7 +38,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/cn_dataset/tokens/finewiki/zh
   # ## undl_zh2en_aligned
   # - type: ColumnSelect
@@ -48,7 +48,7 @@ pipeline:
   #     input_col: "text_tokenized"
   #     drop_intermediate: True
   #     child_configs:
-  #     - type: ParquetReader
+  #     - type: LanceReader
   #       input_path: /home/dataset/cn_dataset/tokens/undl_zh2en_aligned
   # ## baidu_baike
   # - type:  ColumnSelect
@@ -58,7 +58,7 @@ pipeline:
   #     input_col: "text_tokenized"
   #     drop_intermediate: True
   #     child_configs:
-  #     - type: ParquetReader
+  #     - type: LanceReader
   #       input_path: /home/dataset/cn_dataset/tokens/baidu_baike
   # english
   ## fineweb-edu-dedup, ~190B
@@ -69,7 +69,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/en_dataset/tokens/fineweb-edu-dedup
   ## finepdf, ~100B
   # - type: ColumnSelect
@@ -89,7 +89,7 @@ pipeline:
   #         input_col: "text_tokenized"
   #         drop_intermediate: True
   #         child_configs:
-  #         - type: ParquetReader
+  #         - type: LanceReader
   #           input_path: /home/dataset/en_dataset/tokens/eng_Latn_dedup_edu_ascend
   ## dclm
   - type: ColumnSelect
@@ -109,7 +109,7 @@ pipeline:
           input_col: "text_tokenized"
           drop_intermediate: True
           child_configs:
-          - type: ParquetReader
+          - type: LanceReader
             input_path: /home/dataset/en_dataset/tokens/dclm_dedup
   ## dolmino/flan 29G
   - type: ColumnSelect
@@ -126,7 +126,7 @@ pipeline:
           input_col: "text_tokenized"
           drop_intermediate: True
           child_configs:
-          - type: ParquetReader
+          - type: LanceReader
             input_path: /home/dataset/en_dataset/tokens/dolmino-mix-1124/flan
   ## dolmino/pes2o 86G
   - type: ColumnSelect
@@ -143,7 +143,7 @@ pipeline:
           input_col: "text_tokenized"
           drop_intermediate: True
           child_configs:
-          - type: ParquetReader
+          - type: LanceReader
             input_path: /home/dataset/en_dataset/tokens/dolmino-mix-1124/pes2o
   ## wiki 12G
   - type: ColumnSelect
@@ -153,7 +153,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/en_dataset/tokens/finewiki/en
   ## arxiv 32.5G
   - type: ColumnSelect
@@ -163,7 +163,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/en_dataset/tokens/arxiv
   ## cosmopedia-v2 50G
   - type: ColumnSelect
@@ -173,7 +173,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/en_dataset/tokens/cosmopedia-v2
   # math
   ## finemath
@@ -184,7 +184,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/math_dataset/tokens/finemath
   ## open-web-math
   - type: ColumnSelect
@@ -194,7 +194,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/math_dataset/tokens/open-web-math
   ## megamath-web-pro
   - type: ColumnSelect
@@ -204,7 +204,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/math_dataset/tokens/MegaMath/megamath-web-pro
   # code
   ## stackexchange
@@ -215,7 +215,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/code_dataset/tokens/stackexchange
   ## text-code
   - type: ColumnSelect
@@ -232,7 +232,7 @@ pipeline:
           input_col: "text_tokenized"
           drop_intermediate: True
           child_configs:
-          - type: ParquetReader
+          - type: LanceReader
             input_path: /home/dataset/math_dataset/tokens/MegaMath/megamath-text-code-block
   ## starcoder
   - type: ColumnSelect
@@ -252,6 +252,6 @@ pipeline:
           input_col: "text_tokenized"
           drop_intermediate: True
           child_configs:
-          - type: ParquetReader
+          - type: LanceReader
             input_path: /home/dataset/code_dataset/tokens/starcoder_tokens
             select_cols: ["text_tokenized", "max_stars_count"]

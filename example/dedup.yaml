@@ -6,6 +6,6 @@ pipeline:
   threshold: 0.7
   num_parallel: 4
   child_configs:
-    - type: ParquetReader
+    - type: LanceReader
       input_path: "/data/sample/pcmind_kaiyuan_2b_sample.lance"
       num_parallel: 4

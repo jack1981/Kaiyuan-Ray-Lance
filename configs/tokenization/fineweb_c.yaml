@@ -1,7 +1,7 @@
 spark:
   app_name: fineweb_c_cleaned_tokens
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
   shuffle: true
   select_cols: ["text_tokenized", "score", "source", "duplicate_count"]
@@ -12,5 +12,5 @@ pipeline:
       output_col: "text_tokenized"
       tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/dataset/cn_dataset/parquets/Fineweb_Edu_Chinese_dedup_cleaned

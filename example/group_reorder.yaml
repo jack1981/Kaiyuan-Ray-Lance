@@ -1,7 +1,7 @@
 spark:
   app_name: reorder_test_v2
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: false
   mode: overwrite
   output_path: /data/output/group_reorder_test.lance
@@ -23,7 +23,7 @@ pipeline:
               column_list:
                 - "type"
               child_configs:
-                - type: ParquetReader
+                - type: LanceReader
                   input_path: "/data/sample/fineweb_chinese.lance"
             - type: AddConstants
               constant_list:
@@ -31,5 +31,5 @@ pipeline:
               column_list:
                 - "type"
               child_configs:
-                - type: ParquetReader
+                - type: LanceReader
                   input_path: "/data/sample/dclm_subset.lance"

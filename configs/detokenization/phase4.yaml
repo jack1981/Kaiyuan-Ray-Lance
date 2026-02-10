@@ -1,7 +1,7 @@
 spark:
   app_name: phase4_detokenization
 pipeline:
-  type: ParquetWriterZstd
+  type: LanceWriterZstd
   mode: overwrite
   select_cols: ["text", "rank"]
   use_coalesce: true
@@ -16,5 +16,5 @@ pipeline:
       clean_up_tokenization_spaces: True
       batch_size: 1000
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/dataset/kaiyuan/v4/stable_phase_ranked

@@ -1,12 +1,12 @@
 from .data_reader import (
-    ParquetReader,
     LanceReader,
+    LanceReaderZstd,
     JsonlZstReader,
     JsonReader,
     NpyReader,
     FormatReader,
 )
-from .data_writer import ParquetWriter, LanceWriter
+from .data_writer import LanceWriter, LanceWriterZstd
 from .deduplication.minhash import MinHash
 from .text_scorer import FastTextScorer, FastTextFilter, SeqClassifierScorer
 from .sampler import Sampler, GroupFlatten, Flatten

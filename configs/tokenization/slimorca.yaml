@@ -1,7 +1,7 @@
 spark:
   app_name: slimorca-tokens
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: true
   mode: overwrite
   select_cols: ["text_tokenized"]

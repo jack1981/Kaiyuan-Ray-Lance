@@ -1,7 +1,7 @@
 spark:
   app_name: tulu-3-sft-0225-tokens
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: true
   mode: overwrite
   select_cols: ["text_tokenized"]
@@ -17,5 +17,5 @@ pipeline:
           output_col: "text"
           separator: "\n"
           child_configs:
-            - type: ParquetReader
+            - type: LanceReader
               input_path: /home/dataset/sft_dataset/parquets/tulu-3-sft-0225/data

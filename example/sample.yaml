@@ -10,6 +10,6 @@ pipeline:
           global_sample_rate: 0.1
           max_sample: 20.0
           child_configs:
-            - type: ParquetReader
+            - type: LanceReader
               input_path: "/data/sample/dclm_subset_dedup.lance"
               num_parallel: 2

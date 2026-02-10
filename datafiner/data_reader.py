@@ -86,8 +86,8 @@ class DataReader(PipelineNode, ABC):
         return self.read()
 
 
-@register("ParquetReader")
-class ParquetReader(DataReader):
+@register("LanceReader")
+class LanceReader(DataReader):
     def __init__(
         self,
         spark: SparkSession,
@@ -98,16 +98,44 @@ class ParquetReader(DataReader):
         mergeSchema: str = "true",
         schema: Union[StructType, list, None] = None,  # Now supports YAML list
         datetimeRebaseModeInRead: str = "CORRECTED",
+        input_format: str = "auto",
     ):
         super().__init__(spark, input_path, num_parallel, child_configs, select_cols)
         self.mergeSchema = mergeSchema
         self.datetimeRebaseModeInRead = datetimeRebaseModeInRead
+        self.input_format = input_format.lower()
 
         # If schema is provided as YAML list → convert to StructType
         if isinstance(schema, list):
             self.schema = build_schema(schema)
         else:
             self.schema = schema  # StructType or None
+
+    def _looks_like_lance_path(self, path: str) -> bool:
+        return path.startswith("lance.") or ".lance" in path
+
+    def _looks_like_parquet_path(self, path: str) -> bool:
+        return ".parquet" in path or "/parquets/" in path or "_parquet" in path
+
+    def _read_one(self, path: str, reader) -> DataFrame:
+        if self.input_format == "lance":
+            return self.spark.table(_as_lance_identifier(path))
+        if self.input_format == "parquet":
+            return reader.parquet(path)
+
+        if self._looks_like_lance_path(path):
+            return self.spark.table(_as_lance_identifier(path))
+        if self._looks_like_parquet_path(path):
+            return reader.parquet(path)
+
+        # Auto mode: prefer Lance, fall back to parquet for legacy datasets.
+        try:
+            return self.spark.table(_as_lance_identifier(path))
+        except Exception as lance_exc:
+            try:
+                return reader.parquet(path)
+            except Exception:
+                raise lance_exc
 
     def read(self) -> DataFrame:
         reader = self.spark.read.option("mergeSchema", self.mergeSchema)
@@ -119,11 +147,13 @@ class ParquetReader(DataReader):
             paths = list(self.input_path)
             if not paths:
                 raise ValueError("input_path list is empty")
-            df = self.spark.table(_as_lance_identifier(paths[0]))
+            df = self._read_one(paths[0], reader)
             for path in paths[1:]:
-                df = df.unionByName(self.spark.table(_as_lance_identifier(path)), allowMissingColumns=True)
+                df = df.unionByName(
+                    self._read_one(path, reader), allowMissingColumns=True
+                )
         else:
-            df = self.spark.table(_as_lance_identifier(self.input_path))
+            df = self._read_one(self.input_path, reader)
 
         if self.select_cols is not None:
             df = df.select(*self.select_cols)
@@ -136,10 +166,10 @@ class ParquetReader(DataReader):
         return df
 
 
-@register("ParquetReaderZstd")
-class ParquetReaderZstd(DataReader):
+@register("LanceReaderZstd")
+class LanceReaderZstd(DataReader):
     """
-    Parquet reader optimized for reading Zstd-compressed files.
+    Lance reader optimized for reading large datasets.
     Uses PyArrow for efficient decompression.
     """
 
@@ -153,15 +183,42 @@ class ParquetReaderZstd(DataReader):
         mergeSchema: str = "true",
         schema: Union[StructType, list, None] = None,
         use_pyarrow: bool = True,
+        input_format: str = "auto",
     ):
         super().__init__(spark, input_path, num_parallel, child_configs, select_cols)
         self.mergeSchema = mergeSchema
         self.use_pyarrow = use_pyarrow
+        self.input_format = input_format.lower()
 
         if isinstance(schema, list):
             self.schema = build_schema(schema)
         else:
             self.schema = schema
+
+    def _looks_like_lance_path(self, path: str) -> bool:
+        return path.startswith("lance.") or ".lance" in path
+
+    def _looks_like_parquet_path(self, path: str) -> bool:
+        return ".parquet" in path or "/parquets/" in path or "_parquet" in path
+
+    def _read_one(self, path: str, reader) -> DataFrame:
+        if self.input_format == "lance":
+            return self.spark.table(_as_lance_identifier(path))
+        if self.input_format == "parquet":
+            return reader.parquet(path)
+
+        if self._looks_like_lance_path(path):
+            return self.spark.table(_as_lance_identifier(path))
+        if self._looks_like_parquet_path(path):
+            return reader.parquet(path)
+
+        try:
+            return self.spark.table(_as_lance_identifier(path))
+        except Exception as lance_exc:
+            try:
+                return reader.parquet(path)
+            except Exception:
+                raise lance_exc
 
     def read(self) -> DataFrame:
         reader = self.spark.read.option("mergeSchema", self.mergeSchema)
@@ -177,11 +234,13 @@ class ParquetReaderZstd(DataReader):
             paths = list(self.input_path)
             if not paths:
                 raise ValueError("input_path list is empty")
-            df = self.spark.table(_as_lance_identifier(paths[0]))
+            df = self._read_one(paths[0], reader)
             for path in paths[1:]:
-                df = df.unionByName(self.spark.table(_as_lance_identifier(path)), allowMissingColumns=True)
+                df = df.unionByName(
+                    self._read_one(path, reader), allowMissingColumns=True
+                )
         else:
-            df = self.spark.table(_as_lance_identifier(self.input_path))
+            df = self._read_one(self.input_path, reader)
 
         if self.select_cols is not None:
             df = df.select(*self.select_cols)
@@ -192,11 +251,6 @@ class ParquetReaderZstd(DataReader):
             df = df.repartition(self.num_parallel)
 
         return df
-
-
-@register("LanceReader")
-class LanceReader(ParquetReader):
-    pass
 
 
 @register("JsonlZstReader")
@@ -266,14 +320,14 @@ class JsonReader(DataReader):
 @register("FormatReader")
 class FormatReader(DataReader):
     """
-    A generic reader that can read from parquet, JSON, or other formats based on the provided type.
+    A generic reader that can read from lance, JSON, or other formats based on the provided type.
     """
 
     def __init__(
         self,
         spark: SparkSession,
         input_path: Union[str, list],
-        data_format: str = "parquet",  # "json"
+        data_format: str = "lance",  # "json"
         num_parallel: int = None,
         child_configs: list = None,
         select_cols: list = None,

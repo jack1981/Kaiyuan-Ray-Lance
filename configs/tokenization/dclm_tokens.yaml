@@ -1,7 +1,7 @@
 spark:
   app_name: dclm_tokens_v0
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/kaiyuan/v0/dclm_tokens
   select_cols: ["fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train_prob", "text_tokenized"]
   shuffle: true
@@ -12,6 +12,6 @@ pipeline:
       output_col: "text_tokenized"
       tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/en_dataset/dclm_dedup/part-*.parquet
           num_parallel: 128

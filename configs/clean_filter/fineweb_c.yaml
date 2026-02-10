@@ -1,7 +1,7 @@
 spark:
   app_name: fineweb_chinese_dedup_cleaned
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: False
   mode: overwrite
   output_path: /home/dataset/cn_dataset/parquets/Fineweb_Edu_Chinese_dedup_cleaned
@@ -11,5 +11,5 @@ pipeline:
       output_col: "text"
       min_length: 50
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: "/home/zh_dataset/Fineweb_Edu_Chinese_dedup/part-*.parquet"

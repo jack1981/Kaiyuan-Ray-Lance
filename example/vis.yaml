@@ -5,6 +5,6 @@ pipeline:
   num_rows: 5
   vertical: true
   child_configs:
-    - type: ParquetReader
+    - type: LanceReader
       input_path: "/data/sample/scored_input.lance"
       num_parallel: 2

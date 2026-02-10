@@ -1,7 +1,7 @@
 spark:
   app_name: stack_v2_smol
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   shuffle: False
   mode: overwrite
   # select_cols: ["text_tokenized", "files", "snapshot_id", "star_events_count", "fork_events_count"]
@@ -24,7 +24,7 @@ pipeline:
               quantile_error: 0.001
               column: "star_events_count"
               child_configs:
-                - type: ParquetReader
+                - type: LanceReader
                   input_path: /home/dataset/code_dataset/stack_v2_smol
                   mergeSchema: "false"
                   schema:

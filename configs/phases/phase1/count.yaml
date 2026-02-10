@@ -9,7 +9,7 @@ pipeline:
     drop_intermediate: True
     task_name: "dclm_count_v0"
     child_configs:
-    - type: ParquetReader
+    - type: LanceReader
       input_path: /home/dataset/en_dataset/tokens/dclm_dedup
       num_parallel: 128
       select_cols: ["text_tokenized"]
@@ -18,7 +18,7 @@ pipeline:
     drop_intermediate: True
     task_name: "fineweb_c_count_v0"
     child_configs:
-    - type: ParquetReader
+    - type: LanceReader
       input_path: /home/dataset/cn_dataset/tokens/fineweb_c_tokens
       num_parallel: 128
       select_cols: ["text_tokenized"]
@@ -36,7 +36,7 @@ pipeline:
         drop_intermediate: True
         task_name: "starcoder_selector_v0"
         child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/dataset/code_dataset/tokens/starcoder_tokens
           num_parallel: 128
           select_cols: ["text_tokenized"]
@@ -54,7 +54,7 @@ pipeline:
         drop_intermediate: True
         task_name: "starcoder_selector_v0"
         child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/dataset/math_dataset/tokens/LLM360_math_dedup
           num_parallel: 128
           select_cols: ["text_tokenized"]

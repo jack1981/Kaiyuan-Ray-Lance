@@ -1,7 +1,7 @@
 spark:
   app_name: math_tokens_v0
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/kaiyuan/v0/math_tokens
   select_cols: ["text_tokenized", "duplicate_count"]
   shuffle: true
@@ -12,6 +12,6 @@ pipeline:
       output_col: "text_tokenized"
       tokenizer_name_or_path: "/mnt/qwen2_tokenizer/tokenizer"
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: /home/math_dataset/LLM360_math_dedup/part-*.parquet
           num_parallel: 128

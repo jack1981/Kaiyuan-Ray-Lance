@@ -66,7 +66,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/cn_dataset/tokens/Fineweb_Edu_Chinese_dedup_cleaned
                       select_cols:
                       - text_tokenized
@@ -103,7 +103,7 @@ pipeline:
                       column_list:
                       - duplicate_count
                       child_configs:
-                      - type: ParquetReader
+                      - type: LanceReader
                         input_path: /home/dataset/cn_dataset/tokens/finewiki/zh
         - type: AddConstants
           constant_list:
@@ -120,7 +120,7 @@ pipeline:
               drop_intermediate: true
               task_name: After processing /home/dataset/cn_dataset/tokens/undl_zh2en_aligned
               child_configs:
-              - type: ParquetReader
+              - type: LanceReader
                 input_path: /home/dataset/cn_dataset/tokens/undl_zh2en_aligned
         - type: AddConstants
           constant_list:
@@ -137,7 +137,7 @@ pipeline:
               drop_intermediate: true
               task_name: After processing /home/dataset/cn_dataset/tokens/baidu_baike
               child_configs:
-              - type: ParquetReader
+              - type: LanceReader
                 input_path: /home/dataset/cn_dataset/tokens/baidu_baike
         - type: AddConstants
           constant_list:
@@ -169,7 +169,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/en_dataset/tokens/fineweb-edu-dedup
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/en_dataset/tokens/fineweb-edu-dedup
                       select_cols:
                       - text_tokenized
@@ -204,7 +204,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/en_dataset/tokens/dclm_dedup
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/en_dataset/tokens/dclm_dedup
                       select_cols:
                       - text_tokenized
@@ -241,7 +241,7 @@ pipeline:
                       column_list:
                       - duplicate_count
                       child_configs:
-                      - type: ParquetReader
+                      - type: LanceReader
                         input_path: /home/dataset/en_dataset/tokens/finewiki/en
         - type: AddConstants
           constant_list:
@@ -266,7 +266,7 @@ pipeline:
                   drop_intermediate: true
                   task_name: /home/dataset/en_dataset/tokens/arxiv
                   child_configs:
-                  - type: ParquetReader
+                  - type: LanceReader
                     input_path: /home/dataset/en_dataset/tokens/arxiv
         - type: AddConstants
           constant_list:
@@ -298,7 +298,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/math_dataset/tokens/finemath
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/math_dataset/tokens/finemath
                       select_cols:
                       - text_tokenized
@@ -333,7 +333,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/math_dataset/tokens/MegaMath/megamath-web-pro
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/math_dataset/tokens/MegaMath/megamath-web-pro
                       select_cols:
                       - text_tokenized
@@ -361,7 +361,7 @@ pipeline:
                   drop_intermediate: true
                   task_name: /home/dataset/code_dataset/tokens/stackexchange
                   child_configs:
-                  - type: ParquetReader
+                  - type: LanceReader
                     input_path: /home/dataset/code_dataset/tokens/stackexchange
         - type: AddConstants
           constant_list:
@@ -393,7 +393,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/code_dataset/tokens/starcoder_tokens
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/code_dataset/tokens/starcoder_tokens
                       select_cols:
                       - text_tokenized
@@ -428,7 +428,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/code_dataset/tokens/swallow-code-v2
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/code_dataset/tokens/swallow-code-v2
                       select_cols:
                       - text_tokenized
@@ -463,7 +463,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/code_dataset/tokens/python-edu
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/code_dataset/tokens/python-edu
                       select_cols:
                       - text_tokenized
@@ -491,7 +491,7 @@ pipeline:
                   drop_intermediate: true
                   task_name: /home/dataset/en_dataset/tokens/cosmopedia-v2
                   child_configs:
-                  - type: ParquetReader
+                  - type: LanceReader
                     input_path: /home/dataset/en_dataset/tokens/cosmopedia-v2
         - type: AddConstants
           constant_list:
@@ -523,7 +523,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/math_dataset/tokens/AutoMathText
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/math_dataset/tokens/AutoMathText
                       select_cols:
                       - text_tokenized
@@ -558,7 +558,7 @@ pipeline:
                     drop_intermediate: true
                     task_name: /home/dataset/math_dataset/tokens/open_web_math
                     child_configs:
-                    - type: ParquetReader
+                    - type: LanceReader
                       input_path: /home/dataset/math_dataset/tokens/open_web_math
                       select_cols:
                       - text_tokenized
@@ -586,7 +586,7 @@ pipeline:
                   drop_intermediate: true
                   task_name: /home/dataset/math_dataset/tokens/swallow-math-v2
                   child_configs:
-                  - type: ParquetReader
+                  - type: LanceReader
                     input_path: /home/dataset/math_dataset/tokens/swallow-math-v2
         - type: AddConstants
           constant_list:
@@ -608,5 +608,5 @@ pipeline:
                 drop_intermediate: true
                 task_name: After processing /home/dataset/en_dataset/tokens/eng_Latn_dedup_edu_ascend_top05
                 child_configs:
-                - type: ParquetReader
+                - type: LanceReader
                   input_path: /home/dataset/en_dataset/tokens/eng_Latn_dedup_edu_ascend_top05

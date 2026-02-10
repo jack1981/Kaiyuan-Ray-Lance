@@ -10,6 +10,6 @@ pipeline:
       comparison: "larger"
       keep_ratio: 0.2
       child_configs:
-        - type: ParquetReader
+        - type: LanceReader
           input_path: "/data/sample/scored_input.lance"
           num_parallel: 2

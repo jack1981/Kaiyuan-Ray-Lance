@@ -1,7 +1,7 @@
 spark:
   app_name: pac_quantile_top60
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/kaiyuan/quantile_stat/pac/top60
   child_configs:
     - type: FilterByRatio
@@ -16,5 +16,5 @@ pipeline:
           column: "pac_score"
           quantile_error: 0.001
           child_configs:
-            - type: ParquetReader
+            - type: LanceReader
               input_path: /home/dataset/cn_dataset/parquets/ZH_dedup_global

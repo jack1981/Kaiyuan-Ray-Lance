@@ -2,7 +2,7 @@ spark:
   app_name: mix_v0
 
 pipeline:
-  type: ParquetWriter
+  type: LanceWriter
   output_path: /home/dataset/kaiyuan/v0/stable_phase
   select_cols: ["text_tokenized"]
   shuffle: true
@@ -12,7 +12,7 @@ pipeline:
     input_col: "text_tokenized"
     drop_intermediate: True
     child_configs:
-    - type: ParquetReader
+    - type: LanceReader
       input_path: /home/dataset/kaiyuan/v0/dclm_tokens
       num_parallel: 128
       select_cols: ["text_tokenized"]
@@ -20,7 +20,7 @@ pipeline:
     input_col: "text_tokenized"
     drop_intermediate: True
     child_configs:
-    - type: ParquetReader
+    - type: LanceReader
       input_path: /home/dataset/kaiyuan/v0/fineweb_c_tokens
       num_parallel: 128
       select_cols: ["text_tokenized"]
@@ -32,7 +32,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/kaiyuan/v0/starcoder_tokens
         num_parallel: 128
         select_cols: ["text_tokenized"]
@@ -44,7 +44,7 @@ pipeline:
       input_col: "text_tokenized"
       drop_intermediate: True
       child_configs:
-      - type: ParquetReader
+      - type: LanceReader
         input_path: /home/dataset/kaiyuan/v0/math_tokens
         num_parallel: 128
         select_cols: ["text_tokenized"]
