@@ -7,7 +7,7 @@ MINIO_NODE_ENDPOINT ?= host.docker.internal:30900
 RAY_ADDRESS ?= ray://raycluster-kaiyuan-head-svc:10001
 KUBERAY_OPERATOR_MANIFEST ?= https://raw.githubusercontent.com/ray-project/kuberay/v1.4.2/ray-operator/config/default/kuberay-operator.yaml
 
-.PHONY: build run run-examples up down logs shell prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
+.PHONY: build run run-examples bench up down logs shell prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
 	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down k8s-ui k8s-history k8s-dashboard-port-forward k8s-history-port-forward
 
 build:
@@ -41,6 +41,9 @@ prepare-example: prepare-examples
 
 run-examples:
 	docker compose run --rm --build app bash script/run_all_examples.sh
+
+bench:
+	docker compose run --rm --build app python script/bench.py --config "$${PIPELINE_CONFIG:-$(PIPELINE_CONFIG)}" --repeat "$${BENCH_REPEAT:-1}" "$${BENCH_EXTRA_ARGS:-}"
 
 k8s-up:
 	@command -v kind >/dev/null 2>&1 || (echo "kind is required. Install: https://kind.sigs.k8s.io/"; exit 2)

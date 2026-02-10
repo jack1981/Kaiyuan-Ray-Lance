@@ -6,7 +6,12 @@ from typing import Tuple
 import yaml
 
 from datafiner.base import PipelineNode, PipelineTree
-from datafiner.dataset_utils import dataset_from_pandas, normalize_lance_path, select_columns, union_children
+from datafiner.dataset_utils import (
+    dataset_from_pandas,
+    normalize_lance_path,
+    select_columns,
+    union_children,
+)
 from datafiner.register import register
 
 
@@ -59,7 +64,7 @@ class Splitter(PipelineNode):
             ds = ds.random_shuffle(seed=42)
 
         if self.select_cols is not None:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
 
         if self.split_method == "exact":
             train_ds, val_ds = self._split_exact(ds)
@@ -77,7 +82,7 @@ class Splitter(PipelineNode):
 
     def _write_split(self, ds, path: str, num_files: int):
         if num_files:
-            ds = ds.repartition(num_files)
+            ds = ds.repartition(num_files, shuffle=False)
 
         mode = self.mode
         ray_mode = {
@@ -96,8 +101,10 @@ class Splitter(PipelineNode):
 
     def _split_exact(self, ds) -> Tuple:
         print(f"Using 'exact' split method for {self.num_train} training rows.")
-        pdf = ds.to_pandas()
+        if hasattr(ds, "split_at_indices"):
+            return ds.split_at_indices([self.num_train])
 
+        pdf = ds.to_pandas()
         if pdf.empty:
             empty = dataset_from_pandas(pdf)
             return empty, empty

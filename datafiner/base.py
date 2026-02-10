@@ -6,7 +6,14 @@ from abc import ABC, abstractmethod
 
 import ray
 
-from datafiner.dataset_utils import RuntimeConfig, default_storage_options
+from datafiner.dataset_utils import (
+    RuntimeConfig,
+    RuntimeDataConfig,
+    configure_data_context,
+    default_storage_options,
+    log_dataset_stats,
+    timed_stage,
+)
 from datafiner.register import CLASS_REGISTRY
 
 
@@ -47,6 +54,8 @@ class PipelineTree:
 
         runtime_config = config.get("ray") or {}
         app_name = runtime_config.get("app_name", "kaiyuan-ray-pipeline")
+        debug_stats = bool(runtime_config.get("debug_stats", False))
+        data_config = RuntimeDataConfig.from_dict(runtime_config.get("data"))
 
         configured_address = runtime_config.get("address")
         if mode == "k8s":
@@ -76,11 +85,15 @@ class PipelineTree:
         else:
             ray.init(**init_kwargs)
 
+        configure_data_context(data_config)
+
         self.runtime = RuntimeConfig(
             app_name=app_name,
             mode=mode,
             ray_address=effective_address,
             storage_options=default_storage_options(runtime_config.get("storage_options")),
+            debug_stats=debug_stats,
+            data=data_config,
         )
 
         pipeline_config = copy.deepcopy(config["pipeline"])
@@ -90,4 +103,7 @@ class PipelineTree:
         self.root = CLASS_REGISTRY[class_type](self.runtime, **pipeline_config)
 
     def run(self):
-        return self.root.run()
+        with timed_stage(self.runtime, "pipeline.root"):
+            ds = self.root.run()
+        log_dataset_stats(self.runtime, ds, "pipeline.result")
+        return ds

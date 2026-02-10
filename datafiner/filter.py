@@ -4,7 +4,7 @@ from enum import Enum
 import pandas as pd
 
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import dataset_from_pandas, union_children
+from datafiner.dataset_utils import dataset_from_pandas, map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -68,7 +68,7 @@ class Filter(PipelineNode):
             mask = self.comp_op.func(values, self.threshold)
             return batch[mask.fillna(False)]
 
-        return ds.map_batches(filter_batch, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, filter_batch, batch_format="pandas")
 
 
 @register("FilterByRatio")

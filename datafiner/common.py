@@ -1,5 +1,11 @@
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import drop_columns, select_columns, show_dataset, union_children
+from datafiner.dataset_utils import (
+    drop_columns,
+    map_batches_tuned,
+    select_columns,
+    show_dataset,
+    union_children,
+)
 from datafiner.register import register
 
 
@@ -23,7 +29,7 @@ class ColumnSelect(PipelineNode):
     def run(self):
         ds = union_children(self.children, by_name=False)
         print(f"[ColumnSelect] Selecting columns: {self.select_cols}")
-        return select_columns(ds, self.select_cols)
+        return select_columns(ds, self.select_cols, runtime=self.runtime)
 
 
 @register("ColumnDrop")
@@ -46,7 +52,7 @@ class ColumnDrop(PipelineNode):
     def run(self):
         ds = union_children(self.children, by_name=False)
         print(f"[ColumnDrop] Dropping columns: {self.drop_cols}")
-        return drop_columns(ds, self.drop_cols)
+        return drop_columns(ds, self.drop_cols, runtime=self.runtime)
 
 
 @register("ColumnAlias")
@@ -71,7 +77,7 @@ class ColumnAlias(PipelineNode):
                 out = out.rename(columns={self.input_col: self.output_col})
             return out
 
-        return ds.map_batches(alias_batch, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, alias_batch, batch_format="pandas")
 
 
 @register("Schema")

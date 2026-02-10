@@ -11,8 +11,11 @@ import ray.data
 
 from datafiner.base import PipelineNode
 from datafiner.dataset_utils import (
+    debug_log,
+    log_dataset_stats,
     normalize_lance_path,
     select_columns,
+    timed_stage,
     union_children,
 )
 from datafiner.register import register
@@ -86,7 +89,7 @@ class LanceReader(DataReader):
     def _read_parquet(self, path: str):
         ds = ray.data.read_parquet(path)
         if self.select_cols is not None:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
         return ds
 
     def _read_one(self, path: str):
@@ -107,7 +110,10 @@ class LanceReader(DataReader):
 
     def read(self):
         paths = _normalize_paths(self.input_path)
-        datasets = [self._read_one(path) for path in paths]
+        datasets = []
+        for path in paths:
+            with timed_stage(self.runtime, f"reader.read:{self.__class__.__name__}:{path}"):
+                datasets.append(self._read_one(path))
 
         # LanceReader unions by name with missing columns allowed, matching prior behavior.
         ds = datasets[0]
@@ -122,13 +128,17 @@ class LanceReader(DataReader):
             )
 
         if self.select_cols is not None and self.input_format != "lance":
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
 
-        row_count = ds.count()
-        print(f"Number of rows: {row_count}")
+        if self.runtime.debug_stats:
+            with timed_stage(self.runtime, f"reader.count:{self.__class__.__name__}"):
+                row_count = ds.count()
+            debug_log(self.runtime, f"{self.__class__.__name__} row_count={row_count}")
 
         if self.num_parallel is not None and self.num_parallel > 0:
-            ds = ds.repartition(self.num_parallel)
+            ds = ds.repartition(self.num_parallel, shuffle=False)
+
+        log_dataset_stats(self.runtime, ds, f"reader.output:{self.__class__.__name__}")
 
         return ds
 
@@ -146,9 +156,10 @@ class JsonlZstReader(DataReader):
         paths = _normalize_paths(self.input_path)
         ds = ray.data.read_json(paths)
         if self.select_cols is not None:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
         if self.num_parallel is not None and self.num_parallel > 0:
-            ds = ds.repartition(self.num_parallel)
+            ds = ds.repartition(self.num_parallel, shuffle=False)
+        log_dataset_stats(self.runtime, ds, f"reader.output:{self.__class__.__name__}")
         return ds
 
 
@@ -177,9 +188,10 @@ class JsonReader(DataReader):
         paths = _normalize_paths(self.input_path)
         ds = ray.data.read_json(paths)
         if self.select_cols is not None:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
         if self.num_parallel is not None and self.num_parallel > 0:
-            ds = ds.repartition(self.num_parallel)
+            ds = ds.repartition(self.num_parallel, shuffle=False)
+        log_dataset_stats(self.runtime, ds, f"reader.output:{self.__class__.__name__}")
         return ds
 
 
@@ -230,9 +242,10 @@ class FormatReader(DataReader):
             raise ValueError(f"Unsupported format for FormatReader: {self.data_format}")
 
         if self.select_cols is not None:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
         if self.num_parallel is not None and self.num_parallel > 0:
-            ds = ds.repartition(self.num_parallel)
+            ds = ds.repartition(self.num_parallel, shuffle=False)
+        log_dataset_stats(self.runtime, ds, f"reader.output:{self.__class__.__name__}")
         return ds
 
 
@@ -282,10 +295,12 @@ class NpyReader(DataReader):
             ds = ray.data.from_items(rows)
 
         if self.select_cols is not None:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
 
         if self.num_parallel is not None and self.num_parallel > 0:
-            ds = ds.repartition(self.num_parallel)
+            ds = ds.repartition(self.num_parallel, shuffle=False)
+
+        log_dataset_stats(self.runtime, ds, f"reader.output:{self.__class__.__name__}")
 
         return ds
 

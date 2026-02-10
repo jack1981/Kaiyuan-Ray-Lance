@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import dataset_from_pandas, union_children
+from datafiner.dataset_utils import dataset_from_pandas, map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -31,7 +31,7 @@ class DuplicateSampleRatio(PipelineNode):
             ).clip(upper=self.max_sample)
             return out
 
-        return ds.map_batches(apply_ratio, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, apply_ratio, batch_format="pandas")
 
 
 @register("Sampler")
@@ -61,7 +61,7 @@ class Sampler(PipelineNode):
             out = out[out[self.col] > 0]
             return out
 
-        return ds.map_batches(apply_sample, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, apply_sample, batch_format="pandas")
 
 
 @register("Flatten")

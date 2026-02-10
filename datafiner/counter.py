@@ -1,7 +1,7 @@
 import pandas as pd
 
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import union_children
+from datafiner.dataset_utils import map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -37,7 +37,7 @@ class TokenCounter_v2(PipelineNode):
 
         def count_tokens(batch: pd.DataFrame) -> pd.DataFrame:
             out = batch.copy()
-            out[self.count_col] = out[self.input_col].map(
+            out[self.count_col] = out[self.input_col].apply(
                 lambda x: len(x) if isinstance(x, (list, tuple)) else 0
             )
             if self.with_duplicate_count:
@@ -47,7 +47,9 @@ class TokenCounter_v2(PipelineNode):
                 )
             return out
 
-        counted = ds.map_batches(count_tokens, batch_format="pandas")
+        counted = map_batches_tuned(
+            ds, self.runtime, count_tokens, batch_format="pandas"
+        )
 
         if self.summary:
             pdf = counted.to_pandas()
@@ -66,7 +68,9 @@ class TokenCounter_v2(PipelineNode):
             print(f"Average tokens per row: {avg_tokens:.2f}")
 
         if self.drop_intermediate:
-            return counted.map_batches(
+            return map_batches_tuned(
+                counted,
+                self.runtime,
                 lambda batch: batch.drop(columns=[self.count_col], errors="ignore"),
                 batch_format="pandas",
             )

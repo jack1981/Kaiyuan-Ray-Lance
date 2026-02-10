@@ -5,6 +5,14 @@
 
 A tree-structured data preprocessing framework migrated from Spark to Ray Data with Lance I/O.
 
+## Performance Update (What Changed and Why)
+
+- Added Ray Data tuning knobs (`ray.data.*`) so block sizing, batching, and concurrency can be adjusted per environment.
+- Added gated debug instrumentation (`ray.debug_stats`) for stage timings and `ds.stats()` without noisy default logs.
+- Refactored dataset union behavior to avoid large in-memory pandas materialization in common union paths.
+- Added writer-side block capping to reduce small-file output explosion when output partitions are not explicitly set.
+- Expanded tests with structural performance guards (block counts, map-batches operators, controlled write partitioning).
+
 ## Migration Summary
 
 This branch removes Spark/Yarn runtime paths and replaces them with:
@@ -36,11 +44,12 @@ pip install -r requirements.txt
 ## CLI
 
 ```bash
-python main.py --config <config.yaml> --mode local|k8s [--ray-address ray://...]
+python main.py --config <config.yaml> --mode local|k8s [--ray-address ray://...] [--debug-stats]
 ```
 
 - `--mode local`: starts a local Ray runtime if no address is supplied.
 - `--mode k8s`: connects to a remote Ray cluster using `--ray-address`, `ray.address` config, `RAY_ADDRESS`, or default `ray://raycluster-kaiyuan-head-svc:10001`.
+- `--debug-stats`: enables stage-level timing and `ds.stats()` logs (same as setting `ray.debug_stats: true` in YAML).
 
 ## Local Run (Laptop / Docker)
 
@@ -69,6 +78,18 @@ Default example is `example/read_write.yaml`.
 ```bash
 make run-examples
 ```
+
+### 5) Manual benchmark (non-CI)
+
+```bash
+make bench
+```
+
+Useful env vars:
+
+- `PIPELINE_CONFIG=example/read_write.yaml`
+- `BENCH_REPEAT=3`
+- `BENCH_EXTRA_ARGS=--debug-stats`
 
 ## Kubernetes Run (KubeRay)
 
@@ -148,6 +169,12 @@ make k8s-down
 ```yaml
 ray:
   app_name: read_write
+  debug_stats: false
+  data:
+    batch_size: 1024
+    target_block_size_mb: 128
+    concurrency: null
+    max_write_blocks: 64
 pipeline:
   type: LanceWriter
   output_path: data/output/read_write.lance
@@ -155,6 +182,41 @@ pipeline:
     - type: LanceReader
       input_path: "data/sample/pcmind_kaiyuan_2b_sample.lance"
 ```
+
+## Performance Tuning
+
+### Ray Data knobs
+
+- `ray.debug_stats`: `true` enables timing logs and `ds.stats()` snapshots per stage.
+- `ray.data.batch_size`: default `1024`; used by `map_batches` transforms if stage does not override.
+- `ray.data.target_block_size_mb`: default `128`; applied to Ray Data context for read/task granularity.
+- `ray.data.concurrency`: optional global `map_batches` concurrency cap.
+- `ray.data.max_write_blocks`: default `64`; caps write-side blocks when `num_output_files` is not set.
+
+### Recommended defaults
+
+- Laptop/local:
+  - `batch_size: 512-2048`
+  - `concurrency: null` (let Ray pick) or small explicit value (2-8)
+  - `target_block_size_mb: 64-128`
+- KubeRay:
+  - increase `batch_size` and `concurrency` gradually with memory headroom
+  - keep `target_block_size_mb` in `128-512` range for fewer tiny tasks
+  - set `num_output_files` for deterministic output layout when needed
+
+### Reading `ds.stats()`
+
+- Check operator count and task fan-out for accidental tiny-block explosions.
+- Ensure heavy transforms appear as `MapBatches(...)` operators (not row-wise map operators).
+- Confirm repartition/shuffle operators only appear when intentionally configured.
+
+## Regression Testing
+
+- Run `pytest -q` for correctness + structural performance guard tests.
+- Structural guard tests focus on:
+  - bounded block counts after read/union/transform,
+  - controlled write partition counts,
+  - map-batches operator presence in dataset stats.
 
 ## Lance I/O Notes
 

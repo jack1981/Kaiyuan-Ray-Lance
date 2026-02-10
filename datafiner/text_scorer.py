@@ -9,7 +9,7 @@ import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import union_children
+from datafiner.dataset_utils import map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -20,12 +20,16 @@ class TextScorer(PipelineNode, ABC):
         model_path: str,
         output_col: str,
         input_col: str = "text",
+        batch_size: int | None = None,
+        concurrency: int | None = None,
         child_configs: list = None,
     ):
         super().__init__(runtime, child_configs)
         self.model_path = model_path
         self.output_col = output_col
         self.input_col = input_col
+        self.batch_size = batch_size
+        self.concurrency = concurrency
 
     @abstractmethod
     def score(self, ds):
@@ -71,6 +75,8 @@ class FastTextScorer(TextScorer):
         selected_label: str,
         output_col: str,
         input_col: str = "text",
+        batch_size: int | None = None,
+        concurrency: int | None = None,
         child_configs: list = None,
     ):
         super().__init__(
@@ -78,6 +84,8 @@ class FastTextScorer(TextScorer):
             model_path,
             output_col,
             input_col,
+            batch_size,
+            concurrency,
             child_configs,
         )
         self.num_labels = num_labels
@@ -93,8 +101,9 @@ class FastTextScorer(TextScorer):
                 score_batch.model = fasttext.load_model(model_path)
 
             out = batch.copy()
+            texts = out[self.input_col].fillna("").astype(str).tolist()
 
-            def _score(text):
+            def _score_text(text: str) -> float:
                 clean_text = str(text).replace("\n", " ").replace("\r", " ").strip().lower()
                 if not clean_text:
                     return 0.0
@@ -105,10 +114,17 @@ class FastTextScorer(TextScorer):
                     return float(probs[labels.index(selected_label)])
                 return 0.0
 
-            out[self.output_col] = out[self.input_col].map(_score)
+            out[self.output_col] = [_score_text(text) for text in texts]
             return out
 
-        return ds.map_batches(score_batch, batch_format="pandas")
+        return map_batches_tuned(
+            ds,
+            self.runtime,
+            score_batch,
+            batch_format="pandas",
+            batch_size=self.batch_size,
+            concurrency=self.concurrency,
+        )
 
 
 @register("FastTextFilter")
@@ -123,6 +139,8 @@ class FastTextFilter(FastTextScorer):
         temp_col: str = "filter_score",
         child_configs: list = None,
         threshold: float = 0.5,
+        batch_size: int | None = None,
+        concurrency: int | None = None,
     ):
         super().__init__(
             runtime,
@@ -131,6 +149,8 @@ class FastTextFilter(FastTextScorer):
             selected_label,
             temp_col,
             input_col,
+            batch_size,
+            concurrency,
             child_configs,
         )
         self.threshold = threshold
@@ -147,7 +167,14 @@ class FastTextFilter(FastTextScorer):
             out = batch[pd.to_numeric(batch[self.temp_col], errors="coerce") > self.threshold].copy()
             return out.drop(columns=[self.temp_col], errors="ignore")
 
-        return scored.map_batches(apply_filter, batch_format="pandas")
+        return map_batches_tuned(
+            scored,
+            self.runtime,
+            apply_filter,
+            batch_format="pandas",
+            batch_size=self.batch_size,
+            concurrency=self.concurrency,
+        )
 
 
 @register("SeqClassifierScorer")
@@ -159,6 +186,8 @@ class SeqClassifierScorer(TextScorer):
         output_col: str,
         selected_index: int = 0,
         input_col: str = "text",
+        batch_size: int | None = None,
+        concurrency: int | None = None,
         child_configs: list = None,
     ):
         super().__init__(
@@ -166,6 +195,8 @@ class SeqClassifierScorer(TextScorer):
             model_path,
             output_col,
             input_col,
+            batch_size,
+            concurrency,
             child_configs,
         )
         self.selected_index = selected_index
@@ -184,14 +215,14 @@ class SeqClassifierScorer(TextScorer):
                 score_batch.model.eval()
 
             out = batch.copy()
+            texts = [str(x).replace("\n", " ").replace("\r", " ").strip() for x in out[self.input_col].fillna("").tolist()]
+            scores = [0.0] * len(texts)
 
-            def _score(text):
-                clean_text = str(text).replace("\n", " ").replace("\r", " ").strip()
-                if not clean_text:
-                    return 0.0
-
+            valid_indices = [idx for idx, text in enumerate(texts) if text]
+            if valid_indices:
+                valid_texts = [texts[idx] for idx in valid_indices]
                 input_ids = score_batch.tokenizer(
-                    clean_text,
+                    valid_texts,
                     return_tensors="pt",
                     max_length=512,
                     padding=True,
@@ -201,13 +232,24 @@ class SeqClassifierScorer(TextScorer):
                     outputs = score_batch.model(**input_ids)
                     logits = outputs.logits.detach().cpu().float().numpy()
 
-                if logits.ndim == 2:
-                    return float(logits[0][selected_index])
                 if logits.ndim == 1:
-                    return float(logits[selected_index])
-                return float(logits.reshape(-1)[selected_index])
+                    logits = logits.reshape(1, -1)
 
-            out[self.output_col] = out[self.input_col].map(_score)
+                for pos, idx in enumerate(valid_indices):
+                    row_logits = logits[pos]
+                    if selected_index < len(row_logits):
+                        scores[idx] = float(row_logits[selected_index])
+                    else:
+                        scores[idx] = 0.0
+
+            out[self.output_col] = scores
             return out
 
-        return ds.map_batches(score_batch, batch_format="pandas")
+        return map_batches_tuned(
+            ds,
+            self.runtime,
+            score_batch,
+            batch_format="pandas",
+            batch_size=self.batch_size,
+            concurrency=self.concurrency,
+        )

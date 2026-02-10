@@ -4,9 +4,13 @@ from abc import ABC, abstractmethod
 
 from datafiner.base import PipelineNode
 from datafiner.dataset_utils import (
+    cap_dataset_blocks_for_write,
+    dataset_num_blocks,
+    log_dataset_stats,
     normalize_lance_path,
     path_exists,
     select_columns,
+    timed_stage,
     union_children,
 )
 from datafiner.register import register
@@ -31,11 +35,13 @@ class DataWriter(PipelineNode, ABC):
         pass
 
     def run(self):
-        ds = union_children(self.children, by_name=False)
+        with timed_stage(self.runtime, f"writer.input:{self.__class__.__name__}"):
+            ds = union_children(self.children, by_name=False)
         if self.select_cols:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
         if self.shuffle:
             ds = ds.random_shuffle()
+        log_dataset_stats(self.runtime, ds, f"writer.pre_write:{self.__class__.__name__}")
         return self.write(ds)
 
 
@@ -73,7 +79,7 @@ class LanceWriter(DataWriter):
             return None
 
         if self.num_read_partitions is not None and self.num_read_partitions > 0:
-            ds = ds.repartition(self.num_read_partitions)
+            ds = ds.repartition(self.num_read_partitions, shuffle=False)
         return ds
 
     def run(self):
@@ -88,11 +94,13 @@ class LanceWriter(DataWriter):
             print("[LanceWriter] Cache miss. Proceeding to compute and write.")
 
         print("[LanceWriter] Computing dataset from children...")
-        ds = union_children(self.children, by_name=False)
+        with timed_stage(self.runtime, f"writer.input:{self.__class__.__name__}"):
+            ds = union_children(self.children, by_name=False)
         if self.select_cols:
-            ds = select_columns(ds, self.select_cols)
+            ds = select_columns(ds, self.select_cols, runtime=self.runtime)
         if self.shuffle:
             ds = ds.random_shuffle()
+        log_dataset_stats(self.runtime, ds, f"writer.pre_write:{self.__class__.__name__}")
         return self.write(ds)
 
     def write(self, ds):
@@ -100,7 +108,9 @@ class LanceWriter(DataWriter):
             print(
                 f"[LanceWriter] Repartitioning dataset to {self.num_output_files} blocks for write."
             )
-            ds = ds.repartition(self.num_output_files)
+            ds = ds.repartition(self.num_output_files, shuffle=False)
+        else:
+            ds = cap_dataset_blocks_for_write(ds, self.runtime)
 
         effective_mode = self.mode
         if self.mode == "read_if_exists":
@@ -118,11 +128,13 @@ class LanceWriter(DataWriter):
         }.get(effective_mode, "create")
 
         print(f"[LanceWriter] Writing data to {self.output_path} (mode={ray_mode})")
-        ds.write_lance(
-            normalize_lance_path(self.output_path),
-            mode=ray_mode,
-            storage_options=self.storage_options,
-        )
+        with timed_stage(self.runtime, f"writer.write_lance:{self.output_path}"):
+            ds.write_lance(
+                normalize_lance_path(self.output_path),
+                mode=ray_mode,
+                storage_options=self.storage_options,
+            )
+        log_dataset_stats(self.runtime, ds, f"writer.output:{self.__class__.__name__}")
         return ds
 
 
@@ -167,7 +179,9 @@ class LanceWriterZstd(LanceWriter):
         if self.use_coalesce and self.num_output_files is not None and self.num_output_files > 0:
             ds = ds.repartition(self.num_output_files, shuffle=False)
         elif self.use_coalesce:
-            target = max(1, int(ds.num_blocks() / max(self.merge_count, 1)))
-            ds = ds.repartition(target, shuffle=False)
+            num_blocks, ds = dataset_num_blocks(ds, materialize_if_needed=True)
+            if num_blocks is not None:
+                target = max(1, int(num_blocks / max(self.merge_count, 1)))
+                ds = ds.repartition(target, shuffle=False)
 
         return super().write(ds)

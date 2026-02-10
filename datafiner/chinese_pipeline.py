@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from datafiner.base import PipelineNode
+from datafiner.dataset_utils import map_batches_tuned
 from datafiner.regexp.clean_rules import apply_all_clean_rules
 from datafiner.regexp.filter_rules import should_filter_text
 from datafiner.register import register
@@ -45,12 +46,13 @@ class ChineseCleanAndFilter(PipelineNode):
 
         def clean_batch(batch: pd.DataFrame) -> pd.DataFrame:
             out = batch.copy()
-            flags = out[self.input_col].map(should_filter_text)
-            length_ok = out[self.input_col].fillna("").map(lambda x: len(str(x)) >= self.min_length)
+            texts = out[self.input_col].fillna("").astype(str)
+            flags = texts.apply(should_filter_text)
+            length_ok = texts.str.len() >= self.min_length
             out = out[(~flags) & length_ok]
-            out[self.output_col] = out[self.input_col].map(
+            out[self.output_col] = out[self.input_col].apply(
                 lambda x: apply_all_clean_rules(str(x)) if x is not None else None
             )
             return out
 
-        return ds.map_batches(clean_batch, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, clean_batch, batch_format="pandas")

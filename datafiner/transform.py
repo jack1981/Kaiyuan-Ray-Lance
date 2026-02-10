@@ -1,7 +1,7 @@
 import pandas as pd
 
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import union_children
+from datafiner.dataset_utils import map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -30,7 +30,7 @@ class AddConstants(PipelineNode):
                 out[column_name] = constant
             return out
 
-        return ds.map_batches(add_constants, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, add_constants, batch_format="pandas")
 
 
 @register("ConversationToParagraph")
@@ -74,7 +74,7 @@ class ConversationToParagraph(PipelineNode):
             out[self.output_col] = out[self.input_col].map(to_paragraph)
             return out
 
-        return ds.map_batches(convert, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, convert, batch_format="pandas")
 
 
 @register("ConcatenateColumns")
@@ -106,4 +106,4 @@ class ConcatenateColumns(PipelineNode):
             )
             return out
 
-        return ds.map_batches(concat, batch_format="pandas")
+        return map_batches_tuned(ds, self.runtime, concat, batch_format="pandas")

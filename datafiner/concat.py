@@ -1,5 +1,5 @@
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import union_children
+from datafiner.dataset_utils import map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -43,4 +43,6 @@ class Concat(PipelineNode):
             )
             return out
 
-        return ds.map_batches(concat_columns, batch_format="pandas")
+        return map_batches_tuned(
+            ds, self.runtime, concat_columns, batch_format="pandas"
+        )

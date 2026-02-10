@@ -2,7 +2,7 @@ import pandas as pd
 from transformers import AutoTokenizer
 
 from datafiner.base import PipelineNode
-from datafiner.dataset_utils import union_children
+from datafiner.dataset_utils import map_batches_tuned, union_children
 from datafiner.register import register
 
 
@@ -14,12 +14,16 @@ class Tokenization(PipelineNode):
         tokenizer_name_or_path: str,
         input_col: str = "text",
         output_col: str = "text_tokenized",
+        batch_size: int | None = None,
+        concurrency: int | None = None,
         child_configs: list = None,
     ) -> None:
         super().__init__(runtime, child_configs)
         self.tokenizer_name_or_path = tokenizer_name_or_path
         self.input_col = input_col
         self.output_col = output_col
+        self.batch_size = batch_size
+        self.concurrency = concurrency
 
     def run(self):
         ds = union_children(self.children, by_name=False)
@@ -35,9 +39,16 @@ class Tokenization(PipelineNode):
                 )
 
             out = batch.copy()
-            out[self.output_col] = out[self.input_col].fillna("").map(
-                lambda x: encode_batch.tokenizer.encode(str(x))
-            )
+            texts = out[self.input_col].fillna("").astype(str).tolist()
+            encoded = encode_batch.tokenizer(texts, add_special_tokens=True)
+            out[self.output_col] = encoded["input_ids"]
             return out
 
-        return ds.map_batches(encode_batch, batch_format="pandas")
+        return map_batches_tuned(
+            ds,
+            self.runtime,
+            encode_batch,
+            batch_format="pandas",
+            batch_size=self.batch_size,
+            concurrency=self.concurrency,
+        )
