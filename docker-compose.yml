@@ -3,6 +3,7 @@ services:
     image: kaiyuan-ray-app:latest
     build:
       context: .
+    shm_size: "4gb"
     working_dir: /workspace
     volumes:
       - .:/workspace
