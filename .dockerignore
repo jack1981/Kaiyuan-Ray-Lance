@@ -30,5 +30,13 @@ data/
 /build/
 *.egg-info/
 
+# Not needed in runtime image
+tests/
+k8s/
+README.md
+LICENSE
+Makefile
+docker-compose.yml
+
 # OS files
 Thumbs.db
