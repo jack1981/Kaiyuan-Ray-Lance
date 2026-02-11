@@ -1,3 +1,12 @@
+"""Public node exports for YAML-driven Ray Data pipeline construction.
+
+Importing this package eagerly registers most built-in node classes and
+best-effort imports optional nodes whose third-party dependencies may be absent.
+The exported operators cover the same filtering, deduplication, sampling, and
+mixing primitives emphasized by the PCMind-2.1 preprocessing framework.
+See also `datafiner/register.py` for the registration mechanism.
+"""
+
 from .data_reader import (
     LanceReader,
     LanceReaderZstd,

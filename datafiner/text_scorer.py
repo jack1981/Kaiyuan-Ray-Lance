@@ -1,3 +1,12 @@
+"""Model-based scoring/filtering nodes for text datasets.
+
+This module provides FastText and sequence-classifier scorers with helper
+utilities for resolving local/remote model artifacts and caching them on disk.
+These scorers represent dataset-specific quality metrics used for filtering and
+mixing decisions in the PCMind-2.1 data recipe.
+See also `script/prepare_local_sample.py` for sample model generation.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -20,11 +29,39 @@ from datafiner.register import register
 
 
 def _is_remote_uri(path: str) -> bool:
+    """Check whether a path uses a remote object-store style scheme.
+
+    Args:
+        path: Candidate model path.
+
+    Returns:
+        True for known remote schemes, else False.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Remote schemes are limited to S3/GS/ABFS variants used in this project.
+    """
     normalized = path.replace("\\", "/")
     return normalized.startswith(("s3://", "s3a://", "gs://", "abfs://"))
 
 
 def _env_bool(name: str) -> bool | None:
+    """Parse an optional boolean environment variable.
+
+    Args:
+        name: Environment variable name.
+
+    Returns:
+        `True`/`False` when set, else `None`.
+
+    Side effects:
+        Reads process environment variables.
+
+    Assumptions:
+        Truthy values are `1/true/yes` (case-insensitive).
+    """
     value = os.getenv(name)
     if value is None:
         return None
@@ -32,16 +69,55 @@ def _env_bool(name: str) -> bool | None:
 
 
 def _model_cache_root() -> Path:
+    """Return root directory used for downloaded/extracted model cache.
+
+    Inputs/outputs:
+        No inputs; returns cache root path.
+
+    Side effects:
+        Reads environment variable.
+
+    Assumptions:
+        Cache directory is writable by current process.
+    """
     return Path(os.getenv("KAIYUAN_MODEL_CACHE_DIR", "/tmp/kaiyuan-ray-model-cache"))
 
 
 def _normalize_s3_path(path: str) -> str:
+    """Normalize `s3a://` paths to `s3://` for Arrow filesystem APIs.
+
+    Args:
+        path: Raw URI.
+
+    Returns:
+        Normalized URI.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Non-`s3a` paths should pass through unchanged.
+    """
     if path.startswith("s3a://"):
         return "s3://" + path[len("s3a://") :]
     return path
 
 
 def _split_s3_uri(path: str) -> tuple[str, str]:
+    """Split an S3 URI into `(bucket, key)` components.
+
+    Args:
+        path: S3/S3A URI.
+
+    Returns:
+        Tuple containing bucket and object key.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        URI points to a concrete object, not just a bucket root.
+    """
     parsed = urlparse(_normalize_s3_path(path))
     if parsed.scheme != "s3" or not parsed.netloc:
         raise ValueError(f"Expected s3:// URI, got: {path}")
@@ -52,6 +128,20 @@ def _split_s3_uri(path: str) -> tuple[str, str]:
 
 
 def _build_s3_filesystem(storage_options: dict | None) -> pafs.S3FileSystem:
+    """Construct Arrow S3 filesystem from storage options and env fallbacks.
+
+    Args:
+        storage_options: Optional Lance/Ray storage options.
+
+    Returns:
+        Configured `pyarrow.fs.S3FileSystem`.
+
+    Side effects:
+        Reads environment variables.
+
+    Assumptions:
+        Endpoint values may include or omit URL scheme.
+    """
     options = dict(storage_options or {})
 
     endpoint = options.get("aws_endpoint") or os.getenv("AWS_ENDPOINT_URL") or os.getenv(
@@ -81,6 +171,8 @@ def _build_s3_filesystem(storage_options: dict | None) -> pafs.S3FileSystem:
         else:
             endpoint_override = endpoint_text
 
+    # NOTE(readability): MinIO deployments in this repo rely on path-style URLs,
+    # so virtual-host addressing is disabled for broad compatibility.
     kwargs = {"force_virtual_addressing": False, "scheme": scheme}
     if endpoint_override:
         kwargs["endpoint_override"] = endpoint_override
@@ -95,6 +187,22 @@ def _build_s3_filesystem(storage_options: dict | None) -> pafs.S3FileSystem:
 
 
 def _download_remote_file(path: str, storage_options: dict | None) -> str:
+    """Download a remote model artifact into deterministic local cache path.
+
+    Args:
+        path: Remote URI.
+        storage_options: Optional storage options for S3 construction.
+
+    Returns:
+        Local filesystem path to cached file.
+
+    Side effects:
+        Performs network I/O and creates cache directories/files.
+
+    Assumptions:
+        Cache key is SHA256 of normalized URI and artifact immutability is
+        acceptable for cache reuse.
+    """
     normalized = _normalize_s3_path(path)
     parsed = urlparse(normalized)
 
@@ -119,6 +227,8 @@ def _download_remote_file(path: str, storage_options: dict | None) -> str:
     if tmp_target.exists():
         tmp_target.unlink()
 
+    # NOTE(readability): Download to `.tmp` then atomic replace to avoid partial
+    # cache files being consumed by concurrent workers.
     with fs.open_input_stream(remote_path) as src, tmp_target.open("wb") as dst:
         shutil.copyfileobj(src, dst, length=8 * 1024 * 1024)
     tmp_target.replace(target)
@@ -126,12 +236,41 @@ def _download_remote_file(path: str, storage_options: dict | None) -> str:
 
 
 def _ensure_local_file(path: str, storage_options: dict | None) -> str:
+    """Return local file path, downloading remote URIs when necessary.
+
+    Args:
+        path: Local path or remote URI.
+        storage_options: Optional storage options for remote download.
+
+    Returns:
+        Local filesystem path.
+
+    Side effects:
+        May download remote file content.
+
+    Assumptions:
+        Local paths are already accessible without additional checks.
+    """
     if not _is_remote_uri(path):
         return path
     return _download_remote_file(path, storage_options)
 
 
 def _extract_zip_archive(path: str) -> str:
+    """Extract a zip archive into content-addressed cache directory.
+
+    Args:
+        path: Local zip file path.
+
+    Returns:
+        Extracted directory path.
+
+    Side effects:
+        Creates/removes cache directories and extracts files.
+
+    Assumptions:
+        Archive content is safe to extract and marker file denotes completion.
+    """
     archive_path = Path(path)
     if not archive_path.is_file():
         raise FileNotFoundError(f"Model archive does not exist: {path}")
@@ -156,6 +295,19 @@ def _extract_zip_archive(path: str) -> str:
 
 
 class TextScorer(PipelineNode, ABC):
+    """Abstract text scorer that maps input text to numeric output columns.
+
+    Inputs/outputs:
+        Reads child dataset(s) and returns dataset with score column added or
+        consumed by subclasses.
+
+    Side effects:
+        Subclasses load model artifacts and run distributed inference tasks.
+
+    Assumptions:
+        `input_col` is string-convertible and `output_col` is writable.
+    """
+
     def __init__(
         self,
         runtime,
@@ -166,6 +318,26 @@ class TextScorer(PipelineNode, ABC):
         concurrency: int | None = None,
         child_configs: list = None,
     ):
+        """Initialize shared scorer settings.
+
+        Args:
+            runtime: Shared runtime config.
+            model_path: Model file/directory/URI reference.
+            output_col: Output score column name.
+            input_col: Input text column name.
+            batch_size: Optional per-stage batch size override.
+            concurrency: Optional per-stage concurrency override.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Concrete subclasses implement `score(ds)`.
+        """
         super().__init__(runtime, child_configs)
         self.model_path = model_path
         self.output_col = output_col
@@ -175,14 +347,53 @@ class TextScorer(PipelineNode, ABC):
 
     @abstractmethod
     def score(self, ds):
+        """Score a dataset and return transformed output dataset.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            Scored dataset.
+
+        Side effects:
+            Model inference and related I/O in subclass implementations.
+
+        Assumptions:
+            Implementations preserve row count/order unless documented otherwise.
+        """
         pass
 
     def run(self):
+        """Execute scorer against unioned child dataset output.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns scorer output dataset.
+
+        Side effects:
+            Executes child nodes and model-scoring tasks.
+
+        Assumptions:
+            Child datasets are union-compatible by position.
+        """
         ds = union_children(self.children, by_name=False)
         return self.score(ds)
 
 
 def _resolve_local_model_dir(model_path: str) -> str:
+    """Resolve a local directory containing `config.json` for HF models.
+
+    Args:
+        model_path: Candidate path provided by config.
+
+    Returns:
+        Best matching directory path, or original input if unresolved.
+
+    Side effects:
+        Walks local filesystem directories.
+
+    Assumptions:
+        Presence of `config.json` identifies usable HF model directories.
+    """
     normalized = model_path.rstrip("/")
     base_name = os.path.basename(normalized)
 
@@ -213,6 +424,21 @@ def _resolve_local_model_dir(model_path: str) -> str:
 
 
 def _resolve_seq_model_path(model_path: str, storage_options: dict | None) -> str:
+    """Resolve sequence-classifier model path from local/remote/zip references.
+
+    Args:
+        model_path: Model reference path or URI.
+        storage_options: Optional storage options for remote download.
+
+    Returns:
+        Local model directory path suitable for HF loaders.
+
+    Side effects:
+        May download remote artifacts and extract zip archives.
+
+    Assumptions:
+        Zipped model artifacts contain an HF-compatible directory tree.
+    """
     local_path = _ensure_local_file(model_path, storage_options)
     if str(local_path).endswith(".zip"):
         local_path = _extract_zip_archive(local_path)
@@ -221,6 +447,20 @@ def _resolve_seq_model_path(model_path: str, storage_options: dict | None) -> st
 
 @register("FastTextScorer")
 class FastTextScorer(TextScorer):
+    """Score text using a supervised FastText model label probability.
+
+    Inputs/outputs:
+        Reads text column and adds float score column for `selected_label`.
+
+    Side effects:
+        Loads FastText model file (local or downloaded) inside worker tasks.
+
+    Assumptions:
+        Model exposes requested label among top-`num_labels` predictions.
+        In PCMind-2.1 style recipes this can represent dataset-specific quality
+        metrics (for example DCLM-style FastText quality scores).
+    """
+
     def __init__(
         self,
         runtime,
@@ -233,6 +473,28 @@ class FastTextScorer(TextScorer):
         concurrency: int | None = None,
         child_configs: list = None,
     ):
+        """Configure FastText scoring parameters.
+
+        Args:
+            runtime: Shared runtime config.
+            model_path: FastText `.bin` model path/URI.
+            num_labels: Number of labels requested per prediction.
+            selected_label: Label whose probability is emitted.
+            output_col: Score output column.
+            input_col: Source text column.
+            batch_size: Optional map-batches batch size override.
+            concurrency: Optional map-batches concurrency override.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Selected label probabilities default to 0 when label not returned.
+        """
         super().__init__(
             runtime,
             model_path,
@@ -246,13 +508,43 @@ class FastTextScorer(TextScorer):
         self.selected_label = selected_label
 
     def score(self, ds):
+        """Run FastText scoring for each input row.
+
+        Args:
+            ds: Source dataset containing text column.
+
+        Returns:
+            Dataset with score column.
+
+        Side effects:
+            Loads model lazily in workers and runs inference.
+
+        Assumptions:
+            Empty/blank text rows produce score `0.0`.
+        """
         model_path = self.model_path
         num_labels = self.num_labels
         selected_label = self.selected_label
         storage_options = self.runtime.storage_options
 
         def score_batch(batch: pd.DataFrame) -> pd.DataFrame:
+            """Score one pandas batch with cached FastText model.
+
+            Args:
+                batch: Source pandas batch.
+
+            Returns:
+                Batch with `output_col` populated.
+
+            Side effects:
+                Loads model artifact on first call per worker.
+
+            Assumptions:
+                Function attribute cache persists across batch invocations.
+            """
             if not hasattr(score_batch, "model"):
+                # NOTE(readability): Worker-local lazy loading prevents repeated
+                # model initialization cost for each micro-batch.
                 resolved_model_path = _ensure_local_file(model_path, storage_options)
                 score_batch.model = fasttext.load_model(resolved_model_path)
 
@@ -260,6 +552,21 @@ class FastTextScorer(TextScorer):
             texts = out[self.input_col].fillna("").astype(str).tolist()
 
             def _score_text(text: str) -> float:
+                """Score one cleaned text string for the selected label.
+
+                Args:
+                    text: Raw text value.
+
+                Returns:
+                    Probability score for `selected_label`.
+
+                Side effects:
+                    None.
+
+                Assumptions:
+                    Text is normalized to lowercase single-line form before
+                    prediction.
+                """
                 clean_text = str(text).replace("\n", " ").replace("\r", " ").strip().lower()
                 if not clean_text:
                     return 0.0
@@ -285,6 +592,18 @@ class FastTextScorer(TextScorer):
 
 @register("FastTextFilter")
 class FastTextFilter(FastTextScorer):
+    """FastText scorer variant that keeps rows above a threshold.
+
+    Inputs/outputs:
+        Scores rows, filters by threshold, and drops temporary score column.
+
+    Side effects:
+        Inherits FastText model loading/inference behavior.
+
+    Assumptions:
+        Filter threshold is applied on numeric-cast temporary score values.
+    """
+
     def __init__(
         self,
         runtime,
@@ -298,6 +617,29 @@ class FastTextFilter(FastTextScorer):
         batch_size: int | None = None,
         concurrency: int | None = None,
     ):
+        """Configure FastText filtering threshold and temporary score column.
+
+        Args:
+            runtime: Shared runtime config.
+            model_path: FastText model path/URI.
+            num_labels: Number of labels requested from model.
+            selected_label: Label used for score selection.
+            input_col: Source text column.
+            temp_col: Temporary score column used during filtering.
+            child_configs: Upstream node configs.
+            threshold: Keep rows strictly above this score.
+            batch_size: Optional batch size override.
+            concurrency: Optional concurrency override.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Temporary score column can be safely dropped in output.
+        """
         super().__init__(
             runtime,
             model_path,
@@ -313,13 +655,52 @@ class FastTextFilter(FastTextScorer):
         self.temp_col = temp_col
 
     def run(self):
+        """Execute score-then-filter workflow on child dataset output.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns filtered dataset.
+
+        Side effects:
+            Runs model inference and filter transform.
+
+        Assumptions:
+            Child datasets are union-compatible by position.
+        """
         ds = union_children(self.children, by_name=False)
         return self.filter(ds)
 
     def filter(self, ds):
+        """Filter scored rows using configured threshold.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            Filtered dataset without temporary score column.
+
+        Side effects:
+            Runs scoring and batch filtering transforms.
+
+        Assumptions:
+            Threshold comparison uses strict greater-than semantics.
+        """
         scored = self.score(ds)
 
         def apply_filter(batch: pd.DataFrame) -> pd.DataFrame:
+            """Filter one batch by temporary score column threshold.
+
+            Args:
+                batch: Scored pandas batch.
+
+            Returns:
+                Batch containing only rows above threshold.
+
+            Side effects:
+                None.
+
+            Assumptions:
+                Non-numeric temp values are coerced to NaN and dropped.
+            """
             out = batch[pd.to_numeric(batch[self.temp_col], errors="coerce") > self.threshold].copy()
             return out.drop(columns=[self.temp_col], errors="ignore")
 
@@ -335,6 +716,19 @@ class FastTextFilter(FastTextScorer):
 
 @register("SeqClassifierScorer")
 class SeqClassifierScorer(TextScorer):
+    """Score text with Hugging Face sequence classification logits.
+
+    Inputs/outputs:
+        Reads text column and emits one selected-logit score per row.
+
+    Side effects:
+        Resolves model paths (including remote/zip), loads tokenizer/model in
+        workers, and runs PyTorch inference.
+
+    Assumptions:
+        `selected_index` references logits index; out-of-range yields 0.
+    """
+
     def __init__(
         self,
         runtime,
@@ -346,6 +740,27 @@ class SeqClassifierScorer(TextScorer):
         concurrency: int | None = None,
         child_configs: list = None,
     ):
+        """Configure sequence-classifier scoring parameters.
+
+        Args:
+            runtime: Shared runtime config.
+            model_path: Local/remote model path.
+            output_col: Output score column.
+            selected_index: Logit index to export as score.
+            input_col: Source text column.
+            batch_size: Optional batch size override.
+            concurrency: Optional concurrency override.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Model and tokenizer are HF-compatible at resolved model path.
+        """
         super().__init__(
             runtime,
             model_path,
@@ -358,12 +773,42 @@ class SeqClassifierScorer(TextScorer):
         self.selected_index = selected_index
 
     def score(self, ds):
+        """Run HF sequence-classifier inference and emit selected logits.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            Dataset with score column.
+
+        Side effects:
+            Loads model/tokenizer lazily in workers and runs PyTorch inference.
+
+        Assumptions:
+            Text is truncated to 512 tokens with padding enabled.
+        """
         model_path = self.model_path
         selected_index = self.selected_index
         storage_options = self.runtime.storage_options
 
         def score_batch(batch: pd.DataFrame) -> pd.DataFrame:
+            """Score one pandas batch with cached tokenizer/model pair.
+
+            Args:
+                batch: Source pandas batch.
+
+            Returns:
+                Batch with selected-logit scores.
+
+            Side effects:
+                Performs lazy model load and CPU inference.
+
+            Assumptions:
+                Empty text rows keep default score `0.0`.
+            """
             if not hasattr(score_batch, "tokenizer"):
+                # NOTE(readability): Resolve and load once per worker to avoid
+                # repeated remote download/extraction and model init overhead.
                 resolved_model_path = _resolve_seq_model_path(model_path, storage_options)
                 score_batch.tokenizer = AutoTokenizer.from_pretrained(resolved_model_path)
                 score_batch.model = AutoModelForSequenceClassification.from_pretrained(

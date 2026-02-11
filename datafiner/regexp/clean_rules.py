@@ -5,6 +5,11 @@ regexp/clean_rules.py
 
 定义用于清洗文本的正则表达式规则（替换模式）
 这些规则会查找目标字符串并将其替换为空格，但保留数据集中的序列
+
+This module is used by `datafiner/chinese_pipeline.py` for deterministic text
+normalization before downstream scoring/filtering.
+It supports Chinese-domain preprocessing where data quality varies strongly
+across sources, as highlighted in the PCMind-2.1 report.
 """
 
 import re
@@ -21,12 +26,42 @@ class CleanRule:
         description: str = "",
         flags: int = 0,
     ):
+        """Compile one regex substitution rule.
+
+        Args:
+            pattern: Regex expression to match.
+            replacement: Replacement text.
+            description: Human-readable rule purpose.
+            flags: Regex compile flags.
+
+        Returns:
+            None.
+
+        Side effects:
+            Compiles regex object at initialization.
+
+        Assumptions:
+            Rules are order-dependent when applied sequentially.
+        """
         self.pattern = re.compile(pattern, flags=flags)
         self.replacement = replacement
         self.description = description
 
     def apply(self, text: str) -> str:
-        """应用清洗规则"""
+        """Apply this rule to one input string.
+
+        Args:
+            text: Input text.
+
+        Returns:
+            Text with pattern replacements applied.
+
+        Side effects:
+            None.
+
+        Assumptions:
+            Caller ensures `text` is a valid string.
+        """
         return self.pattern.sub(self.replacement, text)
 
 
@@ -158,7 +193,17 @@ CLEAN_RULES = [
 
 
 def get_clean_rules() -> List[CleanRule]:
-    """获取所有清洗规则"""
+    """Return configured clean-rule sequence.
+
+    Inputs/outputs:
+        No inputs; returns global clean-rule list.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Callers treat returned list as read-only shared configuration.
+    """
     return CLEAN_RULES
 
 
@@ -177,7 +222,9 @@ def apply_all_clean_rules(text: str) -> str:
 
     cleaned = text
 
-    # 应用所有规则
+    # NOTE(readability): Rule order is intentional because some substitutions
+    # simplify later pattern matching (for example HTML removal before generic
+    # symbol cleanup).
     for rule in CLEAN_RULES:
         cleaned = rule.apply(cleaned)
 

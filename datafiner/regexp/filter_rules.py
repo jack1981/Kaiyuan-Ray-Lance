@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 regexp/filter_rules.py
+
+Regex-based probabilistic filtering rules used by the Chinese cleaning node.
+See also `datafiner/regexp/clean_rules.py`.
 """
 
 import re
@@ -15,13 +18,42 @@ class RandomFilterRule:
     def __init__(
         self, pattern: str, keep_ratio: float, description: str = "", flags: int = 0
     ):
+        """Compile one probabilistic regex filter rule.
+
+        Args:
+            pattern: Regex expression used to detect candidate text.
+            keep_ratio: Probability of keeping a matched text.
+            description: Human-readable rule description.
+            flags: Regex compile flags.
+
+        Returns:
+            None.
+
+        Side effects:
+            Compiles regex object at initialization.
+
+        Assumptions:
+            Matched text is dropped with probability `1 - keep_ratio`.
+        """
         self.pattern = re.compile(pattern, flags=flags)
         self.keep_ratio = keep_ratio
         self.description = description
 
     def should_filter(self, text: str) -> bool:
         """
-        Returns True if the text should be filtered.
+        Decide whether one text should be filtered by this rule.
+
+        Args:
+            text: Input text.
+
+        Returns:
+            True when this rule decides to filter the text.
+
+        Side effects:
+            Uses pseudo-random sampling for probabilistic rules.
+
+        Assumptions:
+            Unmatched text always returns False for this rule.
         """
         if self.pattern.search(text):
             decision = random.random() > self.keep_ratio
@@ -87,12 +119,35 @@ FILTER_RULES: List[RandomFilterRule] = [
 
 
 def get_filter_rules() -> List[RandomFilterRule]:
+    """Return configured probabilistic filter-rule sequence.
+
+    Inputs/outputs:
+        No inputs; returns global filter-rule list.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Returned rules are shared configuration and should not be mutated.
+    """
     return FILTER_RULES
 
 
 def should_filter_text(text: str) -> bool:
     """
-    Returns True if text should be filtered.
+    Evaluate all rules and decide whether text should be dropped.
+
+    Args:
+        text: Input text candidate.
+
+    Returns:
+        True when any rule filters the text or text is invalid.
+
+    Side effects:
+        Uses randomness for probabilistic rules.
+
+    Assumptions:
+        Empty/non-string values are treated as invalid and filtered.
     """
     if not text or not isinstance(text, str):
         return True

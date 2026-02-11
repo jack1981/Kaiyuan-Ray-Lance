@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Upload local sample Lance/model assets to MinIO for K8s examples.
+
+The script validates required local assets, mirrors sample/model directories to
+an S3-compatible bucket, and packages the tiny sequence-classifier model.
+"""
 
 import argparse
 import shutil
@@ -10,6 +15,22 @@ import pyarrow.fs as pafs
 
 
 def upload_file(fs: pafs.S3FileSystem, local_path: Path, remote_path: str) -> None:
+    """Upload one local file to S3-compatible storage.
+
+    Args:
+        fs: Configured Arrow S3 filesystem.
+        local_path: Source local file path.
+        remote_path: Bucket-relative object path (`bucket/key`).
+
+    Returns:
+        None.
+
+    Side effects:
+        Creates remote parent directories and uploads bytes via network I/O.
+
+    Assumptions:
+        Caller ensures `local_path` exists and is readable.
+    """
     remote_parent = remote_path.rsplit("/", 1)[0]
     fs.create_dir(remote_parent, recursive=True)
     with local_path.open("rb") as src, fs.open_output_stream(remote_path) as dst:
@@ -18,6 +39,22 @@ def upload_file(fs: pafs.S3FileSystem, local_path: Path, remote_path: str) -> No
 
 
 def upload_directory(fs: pafs.S3FileSystem, local_dir: Path, remote_prefix: str) -> None:
+    """Recursively upload all files under a local directory.
+
+    Args:
+        fs: Configured Arrow S3 filesystem.
+        local_dir: Source local directory.
+        remote_prefix: Destination bucket-relative prefix.
+
+    Returns:
+        None.
+
+    Side effects:
+        Walks local filesystem and uploads each file over network.
+
+    Assumptions:
+        Relative file layout under `local_dir` should be preserved remotely.
+    """
     if not local_dir.is_dir():
         raise FileNotFoundError(f"Missing directory: {local_dir}")
 
@@ -32,6 +69,20 @@ def upload_directory(fs: pafs.S3FileSystem, local_dir: Path, remote_prefix: str)
 
 
 def build_tiny_seq_classifier_archive(source_dir: Path) -> Path:
+    """Create temporary zip archive for tiny sequence-classifier directory.
+
+    Args:
+        source_dir: Local model directory root.
+
+    Returns:
+        Path to created temporary archive.
+
+    Side effects:
+        Creates a temp directory and writes a zip file.
+
+    Assumptions:
+        Archive should include top-level `tiny_seq_classifier` directory name.
+    """
     if not source_dir.is_dir():
         raise FileNotFoundError(f"Missing model directory: {source_dir}")
 
@@ -47,6 +98,17 @@ def build_tiny_seq_classifier_archive(source_dir: Path) -> Path:
 
 
 def main() -> None:
+    """Validate required assets and sync them into configured MinIO bucket.
+
+    Inputs/outputs:
+        Reads CLI args and local asset directories; prints upload progress.
+
+    Side effects:
+        Performs network uploads and temporary archive creation/deletion.
+
+    Assumptions:
+        Local sample/model assets were prepared by `prepare_local_sample.py`.
+    """
     parser = argparse.ArgumentParser(
         description="Sync local example assets into MinIO for Ray-on-K8s"
     )
@@ -84,6 +146,8 @@ def main() -> None:
         if not path.is_file():
             raise FileNotFoundError(f"Missing model file: {path}")
 
+    # NOTE(readability): Path-style addressing is used for compatibility with
+    # local MinIO deployments used in kind/KubeRay examples.
     fs = pafs.S3FileSystem(
         access_key=args.access_key,
         secret_key=args.secret_key,

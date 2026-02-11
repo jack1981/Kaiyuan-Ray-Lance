@@ -1,3 +1,13 @@
+"""MinHash-based near-duplicate clustering and collapse node.
+
+This module tokenizes normalized text into n-grams, computes MinHash signatures,
+builds candidate duplicate edges, clusters by connected components, and keeps
+one representative row per cluster with aggregated duplicate counts.
+This corresponds to the report's recommendation to deduplicate before quality
+quantile benchmarking and curriculum construction.
+See also `datafiner/deduplication/text_normalization.py`.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,10 +27,26 @@ from datafiner.deduplication.wcc import weakly_connected_component
 from datafiner.register import register
 
 MERSENNE_PRIME = np.uint64((1 << 61) - 1)
-NON_ALPHA = re.compile("\W", re.UNICODE)
+NON_ALPHA = re.compile(r"\W", re.UNICODE)
 
 
 def ngrams(sequence: List[Text], n: int, min_length: int = 5):
+    """Yield n-grams from a token sequence with short-sequence handling.
+
+    Args:
+        sequence: Token list.
+        n: N-gram size.
+        min_length: Minimum sequence length to emit any grams.
+
+    Returns:
+        Iterable of n-gram tuples (or empty list for short sequences).
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Sequences shorter than `n` but above `min_length` produce one full tuple.
+    """
     if len(sequence) < min_length:
         return []
     if len(sequence) < n:
@@ -33,6 +59,20 @@ def ngrams(sequence: List[Text], n: int, min_length: int = 5):
 
 
 def sha1_hash64(data: bytes):
+    """Hash bytes into a 64-bit integer using SHA-1 prefix.
+
+    Args:
+        data: Byte payload.
+
+    Returns:
+        Unsigned 64-bit hash integer.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        First 8 bytes of SHA-1 digest provide sufficient spread for MinHash use.
+    """
     return struct.unpack("<Q", hashlib.sha1(data).digest()[:8])[0]
 
 
@@ -47,6 +87,28 @@ def generate_hash_values(
     num_rows_per_band: int,
     language: str = "en",
 ):
+    """Generate MinHash LSH band hashes for one document.
+
+    Args:
+        uid: Unique document id.
+        content: Normalized text content.
+        ngram_size: N-gram size used for shingles.
+        min_length: Minimum token length to emit shingles.
+        perm_a: MinHash permutation multiplier vector.
+        perm_b: MinHash permutation offset vector.
+        num_bands: Number of LSH bands.
+        num_rows_per_band: Signature rows per band.
+        language: Tokenization mode (`en` or `zh`).
+
+    Returns:
+        List of `(band_index, band_hash_bytes, uid)` tuples.
+
+    Side effects:
+        Uses jieba tokenization for Chinese mode.
+
+    Assumptions:
+        Input text is pre-normalized and non-empty for meaningful signatures.
+    """
     if language == "en":
         tokens = {
             " ".join(t)
@@ -73,6 +135,20 @@ def generate_hash_values(
 
 
 def generate_edges(nodes: List[int]) -> List[Tuple[int, int]]:
+    """Generate star edges connecting all nodes to minimum representative.
+
+    Args:
+        nodes: Node ids colliding in one LSH bucket.
+
+    Returns:
+        Edge list suitable for connected-component clustering.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Star topology is sufficient because WCC transitivity recovers full group.
+    """
     nodes = list(nodes)
     if len(nodes) <= 1:
         return []
@@ -100,6 +176,29 @@ class MinHash(PipelineNode):
         ngram_size: int = 5,
         min_length: int = 5,
     ):
+        """Configure MinHash deduplication parameters.
+
+        Args:
+            runtime: Shared runtime config.
+            num_permutations: Initial signature permutation count.
+            threshold: Target Jaccard-like near-duplicate threshold.
+            num_parallel: Compatibility arg for downstream WCC API.
+            language: Tokenization language (`en` or `zh`).
+            child_configs: Upstream node configs.
+            input_col_name: Text column to deduplicate.
+            seed: RNG seed for permutation generation.
+            ngram_size: Token n-gram shingle size.
+            min_length: Minimum token count for shingle generation.
+
+        Returns:
+            None.
+
+        Side effects:
+            Computes optimal LSH band/row layout and random permutation vectors.
+
+        Assumptions:
+            Language is limited to English/Chinese tokenization paths.
+        """
         super().__init__(runtime, child_configs)
         self.num_permutations = num_permutations
         self.threshold = threshold
@@ -125,15 +224,91 @@ class MinHash(PipelineNode):
     def optimal_bands_and_rows(
         self, false_positive_weight: float = 0.5, false_negative_weight: float = 0.5
     ):
+        """Search LSH band/row layout minimizing weighted FP/FN area.
+
+        Args:
+            false_positive_weight: Weight for false-positive area term.
+            false_negative_weight: Weight for false-negative area term.
+
+        Returns:
+            None; updates `num_bands`, `num_rows_per_band`, and effective
+            `num_permutations` in place.
+
+        Side effects:
+            Runs numerical integrations across candidate parameter grid.
+
+        Assumptions:
+            Brute-force scan over divisors is acceptable at init-time scale.
+        """
         def false_positive_area(threshold: float, b: int, r: int):
+            """Integrate probability mass where dissimilar pairs collide.
+
+            Args:
+                threshold: Similarity threshold.
+                b: Number of bands.
+                r: Rows per band.
+
+            Returns:
+                Approximate false-positive area under LSH collision curve.
+
+            Side effects:
+                None.
+
+            Assumptions:
+                Standard LSH S-curve approximation applies.
+            """
             def area(s):
+                """LSH collision probability curve for similarity `s`.
+
+                Args:
+                    s: Similarity value in `[0, 1]`.
+
+                Returns:
+                    Collision probability estimate.
+
+                Side effects:
+                    None.
+
+                Assumptions:
+                    Standard banding formula `(1 - (1 - s^r)^b)` applies.
+                """
                 return 1 - (1 - s ** float(r)) ** float(b)
 
             a, _ = integrate(area, 0.0, threshold)
             return a
 
         def false_negative_area(threshold: float, b: int, r: int):
+            """Integrate probability mass where similar pairs fail to collide.
+
+            Args:
+                threshold: Similarity threshold.
+                b: Number of bands.
+                r: Rows per band.
+
+            Returns:
+                Approximate false-negative area under collision complement.
+
+            Side effects:
+                None.
+
+            Assumptions:
+                Uses same LSH S-curve model as false-positive integral.
+            """
             def area(s):
+                """Complement collision probability for false-negative region.
+
+                Args:
+                    s: Similarity value in `[0, 1]`.
+
+                Returns:
+                    Non-collision probability estimate for similar pairs.
+
+                Side effects:
+                    None.
+
+                Assumptions:
+                    Uses complement of standard LSH collision formula.
+                """
                 return 1 - (1 - (1 - s ** float(r)) ** float(b))
 
             a, _ = integrate(area, threshold, 1.0)
@@ -155,10 +330,36 @@ class MinHash(PipelineNode):
         self.num_permutations = self.num_bands * self.num_rows_per_band
 
     def run(self):
+        """Run MinHash deduplication on child dataset output.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns deduplicated representative rows.
+
+        Side effects:
+            Delegates to pandas-materializing dedup pipeline.
+
+        Assumptions:
+            Children are union-compatible by position.
+        """
         ds = union_children(self.children, by_name=False)
         return self.minhash(ds)
 
     def minhash(self, ds):
+        """Compute MinHash buckets, cluster duplicates, and keep representatives.
+
+        Args:
+            ds: Source dataset containing text column.
+
+        Returns:
+            Deduplicated dataset with updated `duplicate_count`.
+
+        Side effects:
+            Materializes full dataset to pandas, runs hashing/tokenization, and
+            prints duplicate-rate summary.
+
+        Assumptions:
+            Representative row per cluster is chosen by minimum generated uid.
+        """
         pdf = ds.to_pandas()
         if pdf.empty:
             return ds
@@ -177,6 +378,8 @@ class MinHash(PipelineNode):
         pdf["uid"] = np.arange(len(pdf), dtype=np.int64)
         pdf["content"] = pdf[self.input_col_name].map(text_normalization)
 
+        # NOTE(readability): Bucket keys are `(band, hash)` so candidate edges
+        # are only created for documents sharing at least one LSH band.
         buckets = {}
         for row in pdf[["uid", "content"]].itertuples(index=False):
             hash_values = generate_hash_values(
@@ -202,7 +405,8 @@ class MinHash(PipelineNode):
         component_map = {int(vid): int(component) for vid, component in component_pairs}
 
         pdf["component"] = pdf["uid"].map(lambda uid: component_map.get(int(uid), int(uid)))
-        # Keep historical behavior where the representative is always the minimum id.
+        # NOTE(readability): Keep historical behavior where the representative is
+        # always the minimum id to preserve deterministic row selection.
         pdf["component"] = pdf[["uid", "component"]].min(axis=1)
 
         grouped = pdf.groupby("component")["duplicate_count"].sum()

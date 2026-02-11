@@ -1,3 +1,11 @@
+"""Ranking/quantile enrichment node for score-based datasets.
+
+This node sorts rows by one score column and appends deterministic rank and/or
+quantile fields.
+It is primarily useful for quality-stratified analysis, including workflows
+similar to the report's quantile benchmarking procedure.
+"""
+
 import numpy as np
 
 from datafiner.base import PipelineNode
@@ -7,6 +15,19 @@ from datafiner.register import register
 
 @register("AddRankQuantile")
 class AddRankQuantile(PipelineNode):
+    """Add rank and quantile columns derived from a score column.
+
+    Inputs/outputs:
+        Reads first child dataset and returns sorted dataset with extra columns.
+
+    Side effects:
+        Materializes dataset to pandas for sorting and column computation.
+
+    Assumptions:
+        Score column exists and is sortable by pandas; quantile buckets are
+        intended for dataset-quality analysis similar to quantile benchmarking.
+    """
+
     def __init__(
         self,
         runtime,
@@ -17,6 +38,26 @@ class AddRankQuantile(PipelineNode):
         require_sorted: bool = False,
         child_configs: list = None,
     ) -> None:
+        """Configure score column and output enrichment toggles.
+
+        Args:
+            runtime: Shared runtime config.
+            score_col: Column used for ranking.
+            add_rank: Whether to add `rank` column.
+            add_quantile: Whether to add `quantile` column.
+            ascending: Sort order for rank assignment.
+            require_sorted: Compatibility flag retained for API parity.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None.
+
+        Assumptions:
+            At least one of `add_rank`/`add_quantile` is True.
+        """
         super().__init__(runtime, child_configs)
 
         if not score_col or not isinstance(score_col, str):
@@ -31,10 +72,35 @@ class AddRankQuantile(PipelineNode):
         self.require_sorted = require_sorted
 
     def run(self):
+        """Run rank/quantile enrichment on first child dataset.
+
+        Inputs/outputs:
+            Reads first child dataset and returns enriched dataset.
+
+        Side effects:
+            Delegates to pandas-materializing helper.
+
+        Assumptions:
+            Node intentionally uses only the first child.
+        """
         ds = self.children[0].run()
         return self._add_rank_and_quantile(ds)
 
     def _add_rank_and_quantile(self, ds):
+        """Sort dataset and append rank/quantile columns as configured.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            Enriched dataset.
+
+        Side effects:
+            Materializes full dataset to pandas.
+
+        Assumptions:
+            Quantile is computed as `rank / N` with ranks starting at 1.
+        """
         if not self.add_rank and not self.add_quantile:
             return ds
 

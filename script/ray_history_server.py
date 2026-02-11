@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Simple HTTP server that renders RayJob history from Kubernetes API.
+
+The server is intended for in-cluster use with service-account credentials and
+provides both HTML and JSON (`/api/jobs`) responses.
+"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -19,11 +25,33 @@ CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
 
 def _read_service_account_token() -> str:
+    """Read Kubernetes service-account bearer token from mounted secret.
+
+    Inputs/outputs:
+        No inputs; returns token string.
+
+    Side effects:
+        Reads token file from filesystem.
+
+    Assumptions:
+        Script runs in Kubernetes pod with standard service-account mount paths.
+    """
     with open(TOKEN_PATH, "r", encoding="utf-8") as f:
         return f.read().strip()
 
 
 def _fetch_rayjobs() -> list[dict[str, Any]]:
+    """Fetch RayJob resources from Kubernetes API for configured namespace.
+
+    Inputs/outputs:
+        No inputs; returns list of RayJob objects (dict form).
+
+    Side effects:
+        Performs HTTPS request to Kubernetes API server.
+
+    Assumptions:
+        Service-account RBAC allows listing RayJob resources.
+    """
     token = _read_service_account_token()
     url = f"{API_SERVER}/apis/ray.io/v1/namespaces/{NAMESPACE}/rayjobs"
     resp = requests.get(
@@ -37,6 +65,20 @@ def _fetch_rayjobs() -> list[dict[str, Any]]:
 
 
 def _fmt_time(value: str | None) -> str:
+    """Format ISO-like timestamps for table display.
+
+    Args:
+        value: Raw timestamp string or None.
+
+    Returns:
+        Human-readable UTC timestamp string or fallback `-`/raw value.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Kubernetes timestamps are ISO8601 with trailing `Z`.
+    """
     if not value:
         return "-"
     try:
@@ -47,7 +89,23 @@ def _fmt_time(value: str | None) -> str:
 
 
 def _render_html(items: list[dict[str, Any]]) -> str:
+    """Render RayJob list as standalone HTML table page.
+
+    Args:
+        items: RayJob resource objects from Kubernetes API.
+
+    Returns:
+        HTML document string.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        RayJob objects follow standard metadata/spec/status structure.
+    """
     rows = []
+    # NOTE(readability): Newest-first ordering mirrors operational expectations
+    # when tracking latest submitted RayJob executions.
     for item in sorted(
         items,
         key=lambda x: x.get("metadata", {}).get("creationTimestamp", ""),
@@ -134,6 +192,17 @@ def _render_html(items: list[dict[str, Any]]) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        """Serve JSON API or HTML history page for incoming GET requests.
+
+        Inputs/outputs:
+            Handles request path and writes HTTP response.
+
+        Side effects:
+            Performs Kubernetes API calls and socket writes.
+
+        Assumptions:
+            Any unexpected exception should return HTTP 500 with plain-text error.
+        """
         try:
             if self.path == "/api/jobs":
                 items = _fetch_rayjobs()
@@ -161,10 +230,32 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(msg)
 
     def log_message(self, fmt: str, *args: Any) -> None:
+        """Suppress default noisy request logging.
+
+        Inputs/outputs:
+            Accepts standard BaseHTTPRequestHandler log args and returns None.
+
+        Side effects:
+            None (intentional no-op).
+
+        Assumptions:
+            Higher-level container logs capture enough operational signal.
+        """
         return
 
 
 def main() -> None:
+    """Start HTTP server and block forever.
+
+    Inputs/outputs:
+        No inputs; binds configured host/port and serves requests.
+
+    Side effects:
+        Opens listening socket and blocks process lifetime.
+
+    Assumptions:
+        Binding on `0.0.0.0` is desired for in-cluster service access.
+    """
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Ray history server listening on 0.0.0.0:{PORT} (namespace={NAMESPACE})")
     server.serve_forever()

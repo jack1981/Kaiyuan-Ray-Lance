@@ -7,7 +7,7 @@ MINIO_NODE_ENDPOINT ?= host.docker.internal:30900
 RAY_ADDRESS ?= auto
 KUBERAY_OPERATOR_KUSTOMIZE ?= github.com/ray-project/kuberay/ray-operator/config/default?ref=v1.4.2
 
-.PHONY: build run run-examples bench up down logs shell prepare-sample prepare-sample-hf prepare-example prepare-examples clean \
+.PHONY: build run run-examples bench up down logs shell prepare-sample prepare-sample-hf clean \
 	k8s-up k8s-prepare k8s-run k8s-run-examples k8s-logs k8s-down k8s-ui k8s-history k8s-dashboard-port-forward k8s-history-port-forward
 
 build:
@@ -30,14 +30,10 @@ shell:
 	docker compose run --rm app bash
 
 prepare-sample:
-	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode synthetic --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
+	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-20000} --source-mode synthetic --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
 
 prepare-sample-hf:
-	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-200} --source-mode $${SOURCE_MODE:-auto} --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
-
-prepare-examples: prepare-sample
-
-prepare-example: prepare-examples
+	docker compose run --rm --build app python script/prepare_local_sample.py --rows $${SAMPLE_ROWS:-20000} --source-mode $${SOURCE_MODE:-auto} --hf-timeout-seconds $${HF_TIMEOUT_SECONDS:-30} --max-hf-parquet-mb $${MAX_HF_PARQUET_MB:-256}
 
 run-examples:
 	docker compose run --rm --build app bash script/run_all_examples.sh
@@ -65,7 +61,7 @@ k8s-up:
 	kubectl -n "$(K8S_NAMESPACE)" wait --for=condition=HeadPodReady raycluster/raycluster-kaiyuan --timeout=300s
 	kubectl -n "$(K8S_NAMESPACE)" rollout status deployment/ray-history-server --timeout=180s
 
-k8s-prepare: prepare-examples
+k8s-prepare: prepare-sample
 	docker compose run --rm --build app python script/sync_assets_to_minio.py \
 		--endpoint $${MINIO_SYNC_ENDPOINT:-$(MINIO_NODE_ENDPOINT)} \
 		--scheme $${MINIO_SCHEME:-http} \

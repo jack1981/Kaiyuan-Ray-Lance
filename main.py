@@ -1,3 +1,10 @@
+"""CLI entrypoint for building and executing configured Ray Data pipelines.
+
+This module parses CLI arguments, optionally rewrites local data/model paths to
+K8s object-store URIs, and runs the configured `PipelineTree`.
+See also `datafiner/base.py` for runtime/bootstrap logic.
+"""
+
 import argparse
 import os
 
@@ -7,6 +14,23 @@ from datafiner.base import PipelineTree
 
 
 def _rewrite_path_for_k8s(path: str, bucket: str) -> str:
+    """Rewrite known local sample/output/model paths to MinIO-backed `s3a://` URIs.
+
+    Args:
+        path: Raw path string from YAML config values.
+        bucket: Bucket name used when generating target object-store URIs.
+
+    Returns:
+        A rewritten URI when the path matches known local prefixes, otherwise the
+        original path.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Only well-known local prefixes should be rewritten; already-remote URIs
+        are left unchanged to preserve explicit user configuration.
+    """
     normalized = path.replace("\\", "/")
     if normalized.startswith(("s3://", "s3a://", "gs://", "abfs://")):
         return path
@@ -34,6 +58,8 @@ def _rewrite_path_for_k8s(path: str, bucket: str) -> str:
         candidate.lstrip("./"),
         candidate.lstrip("/"),
     )
+    # NOTE(readability): Try multiple normalized variants because configs mix
+    # relative paths, absolute workspace paths, and SQL-style `lance.` wrappers.
     for current in candidates:
         for src_prefix, dest_prefix in mappings:
             if current.startswith(src_prefix):
@@ -48,6 +74,22 @@ def _rewrite_path_for_k8s(path: str, bucket: str) -> str:
 
 
 def _rewrite_config_paths_for_k8s(value, bucket: str):
+    """Recursively rewrite all string values in a config tree for K8s execution.
+
+    Args:
+        value: Nested config value (dict/list/scalar).
+        bucket: Target object-store bucket.
+
+    Returns:
+        A deep-rewritten object with path strings mapped through
+        `_rewrite_path_for_k8s`.
+
+    Side effects:
+        None; returns a new nested structure for dict/list inputs.
+
+    Assumptions:
+        Non-string scalars are configuration values and should remain untouched.
+    """
     if isinstance(value, dict):
         return {k: _rewrite_config_paths_for_k8s(v, bucket) for k, v in value.items()}
     if isinstance(value, list):

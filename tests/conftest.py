@@ -1,3 +1,5 @@
+"""Pytest bootstrap helpers for repository-local imports."""
+
 from __future__ import annotations
 
 import sys

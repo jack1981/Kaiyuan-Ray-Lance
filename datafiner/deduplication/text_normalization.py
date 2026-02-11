@@ -1,3 +1,9 @@
+"""Text normalization helpers used by MinHash deduplication.
+
+Normalization aims to improve near-duplicate recall by reducing superficial
+differences (case, punctuation, whitespace, diacritics, number forms).
+"""
+
 import re
 import regex
 import unicodedata
@@ -36,21 +42,28 @@ def text_normalization(
     norm_unicode_diacritics: bool = True,
     norm_numbers: bool = True,
 ) -> str:
-    """Performs the following operations to increase recall when looking for matches between documents:                                - number normalization
-    - weekday normalization                                                                                                            - month normalization
-    - lowercase text
-    - replace all whitespace with a single " "
-    - remove all punctuation                                                                                                           - convert diacritics                                                                                                               - unicode normalize
+    """Normalize text for duplicate matching recall.
+
     Args:
-        text
-                                                                                                                                       Returns:
-        modified text
+        text: Raw text input.
+        lowercase: Whether to lowercase before other transformations.
+        norm_whitespace: Whether to collapse whitespace runs.
+        remove_punctuation: Whether to translate configured punctuation to space.
+        norm_unicode_diacritics: Whether to strip diacritic marks.
+        norm_numbers: Whether to normalize unicode digits to `0`.
+
+    Returns:
+        Normalized text string.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Transformation order is fixed to keep incremental behavior predictable
+        across mixed scripts and punctuation styles.
     """
-    # We should apply the transformation in such order so that, we do same transformations
-    # incrementaly as we would do if we applied each from scratch.                                                                     # Eg.
-    # 1|2|3 -> 000
-    # vs                                                                                                                               # 1|2|3 -> 0                                                                                                                       lowercase: bool = True
-    # lower case
+    # NOTE(readability): The order below is intentional; number normalization
+    # before punctuation/whitespace cleanup yields more stable signatures.
     if lowercase:
         text = text.lower()
     if norm_numbers:

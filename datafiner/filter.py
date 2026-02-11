@@ -1,3 +1,11 @@
+"""Filtering nodes for threshold and ratio-based dataset pruning.
+
+These nodes operate on numeric score columns using pandas batch transforms or
+full-data quantile calculations when ratio targets are requested.
+This aligns with the report's quality-metric based top-k / quantile partition
+selection strategy used before downstream mixing and repetition.
+"""
+
 import operator
 from enum import Enum
 
@@ -20,11 +28,36 @@ class ComparisonOperator(Enum):
     EQUAL = ("==", operator.eq)
 
     def __init__(self, symbol, func):
+        """Store both symbolic and callable form of a comparison operator.
+
+        Inputs/outputs:
+            Accepts operator symbol and comparison function; returns None.
+
+        Side effects:
+            None.
+
+        Assumptions:
+            Enum members are immutable after construction.
+        """
         self.symbol = symbol
         self.func = func
 
     @classmethod
     def from_str(cls, s: str):
+        """Parse human-friendly operator text into enum values.
+
+        Args:
+            s: Operator name or symbol.
+
+        Returns:
+            Matching `ComparisonOperator`.
+
+        Side effects:
+            None.
+
+        Assumptions:
+            Comparison names are case-insensitive and trimmed.
+        """
         s_lower = s.lower().strip()
         if s_lower in ("larger", ">"):
             return cls.LARGER
@@ -53,6 +86,24 @@ class Filter(PipelineNode):
         comparison: str = "larger",
         threshold: float = 0.0,
     ):
+        """Configure static-threshold filtering.
+
+        Args:
+            runtime: Shared runtime config.
+            child_configs: Upstream node configs.
+            column: Numeric column to compare.
+            comparison: Comparison operator name/symbol.
+            threshold: Numeric threshold value.
+
+        Returns:
+            None.
+
+        Side effects:
+            None.
+
+        Assumptions:
+            Non-numeric values are coerced to NaN and treated as non-matching.
+        """
         super().__init__(runtime, child_configs)
         if column is None:
             raise ValueError("The 'column' argument must be specified for Filter.")
@@ -61,9 +112,34 @@ class Filter(PipelineNode):
         self.threshold = threshold
 
     def run(self):
+        """Filter rows using configured comparator and threshold.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns filtered dataset.
+
+        Side effects:
+            Executes `map_batches` across all blocks.
+
+        Assumptions:
+            Batch schemas include the configured `column`.
+        """
         ds = union_children(self.children, by_name=False)
 
         def filter_batch(batch: pd.DataFrame) -> pd.DataFrame:
+            """Apply threshold predicate to one pandas batch.
+
+            Args:
+                batch: Source pandas batch.
+
+            Returns:
+                Filtered batch.
+
+            Side effects:
+                None.
+
+            Assumptions:
+                Missing/invalid numeric values should be dropped.
+            """
             values = pd.to_numeric(batch[self.column], errors="coerce")
             mask = self.comp_op.func(values, self.threshold)
             return batch[mask.fillna(False)]
@@ -75,6 +151,9 @@ class Filter(PipelineNode):
 class FilterByRatio(PipelineNode):
     """
     Filter a dataset to keep a target ratio based on a score column.
+
+    This corresponds to top-k style quality filtering used in phase-wise data
+    refinement (for example keeping top 50/30/10 percent partitions).
     """
 
     def __init__(
@@ -86,6 +165,25 @@ class FilterByRatio(PipelineNode):
         keep_ratio: float = 0.1,
         quantile_error: float = 1e-4,
     ):
+        """Configure quantile-based keep-ratio filtering.
+
+        Args:
+            runtime: Shared runtime config.
+            child_configs: Upstream node configs.
+            column: Numeric score column.
+            comparison: `larger` keeps top scores; `smaller` keeps bottom.
+            keep_ratio: Fraction of rows to keep.
+            quantile_error: Reserved compatibility arg (not currently used).
+
+        Returns:
+            None.
+
+        Side effects:
+            None.
+
+        Assumptions:
+            Full dataset materialization to pandas is acceptable for this node.
+        """
         super().__init__(runtime, child_configs)
         if not (0.0 <= keep_ratio <= 1.0):
             raise ValueError("keep_ratio must be between 0.0 and 1.0")
@@ -97,7 +195,21 @@ class FilterByRatio(PipelineNode):
         self.quantile_error = quantile_error
 
     def run(self):
+        """Keep approximately `keep_ratio` rows based on score quantile threshold.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns filtered dataset.
+
+        Side effects:
+            Materializes full dataset to pandas and computes quantiles.
+
+        Assumptions:
+            Supports only `larger` or `smaller` comparisons for ratio filtering,
+            mapping directly to keep-highest or keep-lowest partitions.
+        """
         ds = union_children(self.children, by_name=False)
+        # NOTE(readability): This operator is intentionally eager because quantile
+        # thresholding needs global score distribution.
         pdf = ds.to_pandas()
         if pdf.empty:
             return ds

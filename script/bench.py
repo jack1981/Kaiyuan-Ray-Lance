@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Manual benchmark runner for repeated end-to-end pipeline execution.
+
+This script executes a configured pipeline multiple times, printing elapsed
+runtime and row counts per iteration.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -11,6 +17,17 @@ from datafiner.base import PipelineTree
 
 
 def main() -> None:
+    """Parse CLI args and run benchmark loop.
+
+    Inputs/outputs:
+        Reads YAML config and prints timing/row-count metrics for each run.
+
+    Side effects:
+        Initializes/shuts down Ray per iteration and may execute full pipeline I/O.
+
+    Assumptions:
+        Benchmark repeats are independent because Ray is shut down after each run.
+    """
     parser = argparse.ArgumentParser(description="Manual Ray Data benchmark runner.")
     parser.add_argument("--config", default="example/read_write.yaml")
     parser.add_argument("--mode", choices=["local", "k8s"], default="local")

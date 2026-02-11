@@ -1,3 +1,5 @@
+"""Integration tests for transform correctness and Lance round-trip behavior."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,6 +10,20 @@ from datafiner.base import PipelineTree
 
 
 def _seed_input_dataset(path: Path) -> None:
+    """Write a tiny deterministic Lance dataset used by integration tests.
+
+    Args:
+        path: Output Lance path.
+
+    Returns:
+        None.
+
+    Side effects:
+        Writes Lance dataset to local filesystem.
+
+    Assumptions:
+        Test data values remain stable for deterministic assertions.
+    """
     rows = [
         {"id": 1, "text": "a", "duplicate_count": 2.0},
         {"id": 2, "text": "b", "duplicate_count": 10.0},
@@ -18,6 +34,19 @@ def _seed_input_dataset(path: Path) -> None:
 
 
 def test_duplicate_sample_ratio_map_batches(tmp_path: Path):
+    """Validate `DuplicateSampleRatio` scales and caps duplicate counts.
+
+    Inputs/outputs:
+        Runs a tiny pipeline and asserts resulting duplicate-count values.
+
+    Side effects:
+        Builds Ray pipeline and reads/writes local Lance test data.
+
+    Assumptions:
+        Transform is implemented via map-batches and preserves row count.
+    """
+    # NOTE(readability): Exact sorted values make the transform contract explicit
+    # for future performance-oriented rewrites.
     input_path = tmp_path / "input.lance"
     _seed_input_dataset(input_path)
 
@@ -44,6 +73,17 @@ def test_duplicate_sample_ratio_map_batches(tmp_path: Path):
 
 
 def test_lance_write_and_read_round_trip(tmp_path: Path):
+    """Ensure LanceWriter produces readable output with unchanged row content.
+
+    Inputs/outputs:
+        Writes through pipeline and reads back directly via Ray Lance reader.
+
+    Side effects:
+        Writes and reads local Lance datasets.
+
+    Assumptions:
+        Basic round-trip should preserve all input rows/ids.
+    """
     input_path = tmp_path / "input_rw.lance"
     output_path = tmp_path / "output_rw.lance"
     _seed_input_dataset(input_path)

@@ -1,3 +1,9 @@
+"""Global shuffle node for Ray datasets.
+
+This node exists as a dedicated stage so configs can force full-row randomization
+between deterministic transforms.
+"""
+
 from __future__ import annotations
 
 from datafiner.base import PipelineNode
@@ -17,22 +23,36 @@ class Shuffler(PipelineNode):
         seed: int | None = None,
         child_configs: list = None,
     ):
-        """
-        Initializes the Shuffle node.
+        """Configure shuffle seed and child dependency.
 
         Args:
-            runtime: Ray runtime configuration.
-            child_configs (list, optional): List of child node configurations. Defaults to None.
+            runtime: Shared runtime config.
+            seed: Optional seed for reproducible shuffle order.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Global shuffle is acceptable from cost and memory perspective.
         """
         super().__init__(runtime, child_configs)
         self.seed = seed
 
     def run(self):
-        """
-        Executes the global shuffle.
+        """Shuffle all rows from child dataset output.
 
-        Returns:
-            Ray dataset: The shuffled dataset.
+        Inputs/outputs:
+            Reads child dataset(s) and returns shuffled dataset.
+
+        Side effects:
+            Triggers Ray shuffle operation across dataset blocks.
+
+        Assumptions:
+            Children are union-compatible by position.
         """
         ds = union_children(self.children, by_name=False)
         return ds.random_shuffle(seed=self.seed)

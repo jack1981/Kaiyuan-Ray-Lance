@@ -1,3 +1,5 @@
+"""Pipeline behavior tests covering read/transform/write and writer modes."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,6 +10,22 @@ from datafiner.base import PipelineTree
 
 
 def _seed_rows(path: Path, rows: list[dict], num_blocks: int | None = None) -> None:
+    """Write deterministic test rows to Lance with optional block repartitioning.
+
+    Args:
+        path: Target Lance dataset path.
+        rows: Row dictionaries to write.
+        num_blocks: Optional block count before write.
+
+    Returns:
+        None.
+
+    Side effects:
+        Writes local Lance files.
+
+    Assumptions:
+        Block repartitioning is non-shuffle for deterministic content order.
+    """
     ds = ray.data.from_items(rows)
     if num_blocks is not None and num_blocks > 0:
         ds = ds.repartition(num_blocks, shuffle=False)
@@ -15,6 +33,17 @@ def _seed_rows(path: Path, rows: list[dict], num_blocks: int | None = None) -> N
 
 
 def test_read_transform_write_round_trip(tmp_path: Path):
+    """Verify end-to-end read-transform-write pipeline preserves expected output.
+
+    Inputs/outputs:
+        Executes composed pipeline and asserts transformed values in output sink.
+
+    Side effects:
+        Reads and writes local Lance datasets.
+
+    Assumptions:
+        DuplicateSampleRatio transform should scale counts deterministically.
+    """
     input_path = tmp_path / "input.lance"
     output_path = tmp_path / "output.lance"
     _seed_rows(
@@ -58,6 +87,17 @@ def test_read_transform_write_round_trip(tmp_path: Path):
 
 
 def test_lance_writer_modes(tmp_path: Path):
+    """Validate LanceWriter mode semantics across overwrite/append/ignore/create.
+
+    Inputs/outputs:
+        Runs writer in multiple modes and asserts sink row counts after each.
+
+    Side effects:
+        Repeatedly writes/reads local Lance datasets.
+
+    Assumptions:
+        `read_if_exists` should return cached dataset without recomputation.
+    """
     input_a = tmp_path / "input_a.lance"
     input_b = tmp_path / "input_b.lance"
     output_path = tmp_path / "output_modes.lance"
@@ -80,6 +120,22 @@ def test_lance_writer_modes(tmp_path: Path):
     )
 
     def run_writer(input_path: Path, mode: str, target: Path):
+        """Build and execute a small writer pipeline for one mode.
+
+        Args:
+            input_path: Source Lance path.
+            mode: Writer mode string.
+            target: Destination Lance path.
+
+        Returns:
+            Output dataset from pipeline run.
+
+        Side effects:
+            Initializes and executes pipeline with Lance I/O.
+
+        Assumptions:
+            Config shape mirrors production writer config contracts.
+        """
         cfg = {
             "ray": {"app_name": f"test-writer-{mode}"},
             "pipeline": {

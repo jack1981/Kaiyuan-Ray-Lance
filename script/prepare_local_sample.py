@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""Prepare local sample Lance datasets and toy models used by examples/tests.
+
+The script can source sample text from Hugging Face parquet files (with timeout
+and size guards) or fallback to synthetic text, then writes multiple Lance
+datasets and lightweight FastText/BERT artifacts.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -18,6 +25,21 @@ from transformers import BertConfig, BertForSequenceClassification, BertTokenize
 
 
 def _pick_first_parquet(repo_id: str, max_size_bytes: int | None = None) -> str:
+    """Pick a representative parquet file from a HF dataset repo.
+
+    Args:
+        repo_id: Hugging Face dataset repository id.
+        max_size_bytes: Optional preferred upper bound for file size.
+
+    Returns:
+        Relative parquet file path within the dataset repo.
+
+    Side effects:
+        Performs Hugging Face metadata API calls.
+
+    Assumptions:
+        Smallest parquet file is a good proxy for quick local sample downloads.
+    """
     api = HfApi()
     try:
         entries = list(
@@ -53,6 +75,22 @@ def _pick_first_parquet(repo_id: str, max_size_bytes: int | None = None) -> str:
 def _load_texts_from_hf(
     dataset: str, rows: int, max_size_bytes: int | None = None
 ) -> List[str]:
+    """Download one HF parquet shard and extract non-empty text rows.
+
+    Args:
+        dataset: Hugging Face dataset repository id.
+        rows: Maximum number of rows to return.
+        max_size_bytes: Optional parquet-size preference for shard selection.
+
+    Returns:
+        List of non-empty text strings.
+
+    Side effects:
+        Downloads parquet file over network and reads parquet content from disk.
+
+    Assumptions:
+        Dataset contains at least one string-like content column.
+    """
     source_file = _pick_first_parquet(dataset, max_size_bytes=max_size_bytes)
     local_file = hf_hub_download(repo_id=dataset, filename=source_file, repo_type="dataset")
     table = pq.read_table(local_file)
@@ -60,6 +98,8 @@ def _load_texts_from_hf(
     if table.num_rows == 0:
         raise RuntimeError(f"Dataset parquet has zero rows: {source_file}")
 
+    # NOTE(readability): Prefer common content column names first to keep sample
+    # semantics stable across runs when datasets include multiple string fields.
     col_names = set(table.schema.names)
     text_col = None
     for candidate in ["text", "content", "raw_content", "document", "body"]:
@@ -95,6 +135,20 @@ def _load_texts_from_hf(
 
 
 def _fallback_texts(rows: int) -> List[str]:
+    """Generate deterministic synthetic fallback text rows.
+
+    Args:
+        rows: Number of text rows to generate.
+
+    Returns:
+        List of synthetic text strings.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Synthetic rows should be diverse enough for smoke tests and model demos.
+    """
     base = [
         "Open-source language model training requires scalable data pipelines.",
         "Ray local mode is useful for rapid preprocessing validation.",
@@ -109,6 +163,21 @@ def _fallback_texts(rows: int) -> List[str]:
 
 
 def _write_lance(path: Path, rows: Iterable[dict]) -> None:
+    """Overwrite a Lance dataset path with provided item rows.
+
+    Args:
+        path: Target Lance dataset directory path.
+        rows: Iterable of row dictionaries.
+
+    Returns:
+        None.
+
+    Side effects:
+        Removes existing path and writes new Lance dataset files.
+
+    Assumptions:
+        Caller intentionally accepts destructive overwrite behavior.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         if path.is_dir():
@@ -122,6 +191,20 @@ def _write_lance(path: Path, rows: Iterable[dict]) -> None:
 
 
 def _build_scored_rows(texts: List[str]) -> List[dict]:
+    """Build deterministic score-bearing rows from input text list.
+
+    Args:
+        texts: Source text list.
+
+    Returns:
+        List of dictionaries with id/text/score fields.
+
+    Side effects:
+        None.
+
+    Assumptions:
+        Scores are synthetic and only intended for example pipeline validation.
+    """
     scored = []
     for i, text in enumerate(texts):
         scored.append(
@@ -137,6 +220,21 @@ def _build_scored_rows(texts: List[str]) -> List[dict]:
 
 
 def _write_fasttext_train_file(path: Path, labeled_rows: List[tuple[str, str]]) -> None:
+    """Write FastText supervised training file in `__label__ text` format.
+
+    Args:
+        path: Target text file path.
+        labeled_rows: Sequence of `(label, text)` tuples.
+
+    Returns:
+        None.
+
+    Side effects:
+        Writes local training file.
+
+    Assumptions:
+        Labels already include FastText `__label__` prefix.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for label, text in labeled_rows:
@@ -146,6 +244,21 @@ def _write_fasttext_train_file(path: Path, labeled_rows: List[tuple[str, str]]) 
 
 
 def _train_fasttext_model(train_path: Path, model_prefix: Path) -> Path:
+    """Train and save a tiny FastText supervised model.
+
+    Args:
+        train_path: FastText-formatted training text file.
+        model_prefix: Output path prefix (without `.bin` suffix).
+
+    Returns:
+        Path to saved `.bin` model.
+
+    Side effects:
+        Performs model training compute and writes model artifact.
+
+    Assumptions:
+        Tiny hyperparameters prioritize speed over model quality.
+    """
     model = fasttext.train_supervised(
         input=str(train_path),
         epoch=25,
@@ -160,6 +273,20 @@ def _train_fasttext_model(train_path: Path, model_prefix: Path) -> Path:
 
 
 def _prepare_tiny_seq_classifier(model_dir: Path) -> Path:
+    """Create a minimal BERT sequence-classifier model directory.
+
+    Args:
+        model_dir: Root model output directory.
+
+    Returns:
+        Path to created `tiny_seq_classifier` directory.
+
+    Side effects:
+        Writes tokenizer vocab/config and model checkpoint files.
+
+    Assumptions:
+        Artifact is for pipeline smoke tests, not production scoring quality.
+    """
     seq_dir = model_dir / "tiny_seq_classifier"
     seq_dir.mkdir(parents=True, exist_ok=True)
 
@@ -207,11 +334,23 @@ def _prepare_tiny_seq_classifier(model_dir: Path) -> Path:
 
 
 def main() -> None:
+    """Prepare sample datasets/models and write a manifest describing outputs.
+
+    Inputs/outputs:
+        Parses CLI args, writes Lance datasets/model files, prints JSON manifest.
+
+    Side effects:
+        Initializes Ray, may perform network access to Hugging Face, writes many
+        local files, and installs temporary alarm signal handler.
+
+    Assumptions:
+        Script runs on POSIX-like environments supporting `signal.SIGALRM`.
+    """
     parser = argparse.ArgumentParser(
         description="Prepare local sample data/models for all example YAMLs"
     )
     parser.add_argument("--dataset", default="thu-pacman/PCMind-2.1-Kaiyuan-2B")
-    parser.add_argument("--rows", type=int, default=200)
+    parser.add_argument("--rows", type=int, default=20000)
     parser.add_argument("--data-root", default="data")
     parser.add_argument(
         "--source-mode",
@@ -249,9 +388,22 @@ def main() -> None:
     source = "synthetic"
 
     def _alarm_handler(signum, frame):
+        """Raise timeout to abort hanging HF metadata/download calls.
+
+        Inputs/outputs:
+            Accepts signal handler args and raises `TimeoutError`.
+
+        Side effects:
+            Interrupts currently running code path via signal exception.
+
+        Assumptions:
+            Handler is installed only around HF network operations.
+        """
         raise TimeoutError(f"HF fetch timed out after {args.hf_timeout_seconds}s")
 
     if args.source_mode in ("auto", "hf"):
+        # NOTE(readability): Timeout guards keep default `make prepare-sample`
+        # responsive even when Hugging Face is slow/unreachable.
         old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
         signal.alarm(args.hf_timeout_seconds)
         try:

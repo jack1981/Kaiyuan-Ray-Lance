@@ -1,3 +1,11 @@
+"""Sorting/reordering node for score-driven corpus ordering.
+
+This implementation materializes to pandas and supports optional fold grouping
+and randomized tiebreaking before converting back to Ray Dataset.
+It maps naturally to within-dataset quality ordering steps used in curriculum
+construction.
+"""
+
 from typing import List, Union
 
 import numpy as np
@@ -11,6 +19,9 @@ from datafiner.register import register
 class Reorder(PipelineNode):
     """
     Reorder a dataset by one or multiple score columns.
+
+    This operator represents within-dataset quality ordering before top-ratio
+    filtering or global interleaving with other datasets.
     """
 
     def __init__(
@@ -24,6 +35,27 @@ class Reorder(PipelineNode):
         folding: int = 1,
         child_configs: list = None,
     ) -> None:
+        """Configure sort keys and ordering behavior.
+
+        Args:
+            runtime: Shared runtime config.
+            score_cols: One or more score columns to sort by.
+            ascending: Bool or list of bools matching score columns.
+            use_random_tiebreaker: Whether to add random tie-break key.
+            approximate: Reserved compatibility flag for prior APIs.
+            num_partitions: Reserved compatibility partition count.
+            folding: Optional fold-id column count for interleaved sorting.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Length of `ascending` must match number of score columns.
+        """
         super().__init__(runtime, child_configs)
 
         if isinstance(score_cols, str):
@@ -55,6 +87,22 @@ class Reorder(PipelineNode):
         self.folding = folding
 
     def reorder(self, ds):
+        """Sort dataset rows according to configured keys and optional helpers.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            Sorted dataset.
+
+        Side effects:
+            Materializes full dataset to pandas and uses NumPy random values when
+            tie-breaker is enabled.
+
+        Assumptions:
+            Sorting in pandas should preserve deterministic ordering for identical
+            inputs when random tiebreaking is disabled.
+        """
         pdf = ds.to_pandas()
         if pdf.empty:
             return ds
@@ -63,6 +111,8 @@ class Reorder(PipelineNode):
         sort_ascending = []
 
         if self.folding > 1:
+            # NOTE(readability): Folding adds a deterministic round-robin key to
+            # spread adjacent rows before score-based sorting.
             pdf["__fold_id__"] = np.arange(len(pdf)) % self.folding
             sort_cols.append("__fold_id__")
             sort_ascending.append(True)
@@ -86,5 +136,16 @@ class Reorder(PipelineNode):
         return dataset_from_pandas(sorted_pdf)
 
     def run(self):
+        """Read child data and return reordered dataset output.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns sorted dataset.
+
+        Side effects:
+            Delegates to pandas-materializing reorder implementation.
+
+        Assumptions:
+            Child datasets are union-compatible by position.
+        """
         ds = union_children(self.children, by_name=False)
         return self.reorder(ds)

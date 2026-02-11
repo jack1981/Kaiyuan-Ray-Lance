@@ -1,3 +1,9 @@
+"""Detokenization nodes for converting token-id arrays back to text.
+
+These nodes use Hugging Face tokenizers in Ray `map_batches` transforms and keep
+invalid token rows as `None` output values.
+"""
+
 import pandas as pd
 from transformers import AutoTokenizer
 
@@ -24,6 +30,28 @@ class Detokenization(PipelineNode):
         concurrency: int | None = None,
         child_configs: list = None,
     ) -> None:
+        """Configure tokenizer path and decode options.
+
+        Args:
+            runtime: Shared runtime config.
+            tokenizer_name_or_path: HF model id or local tokenizer path.
+            input_col: Source token-id column.
+            output_col: Destination decoded text column.
+            skip_special_tokens: Whether to skip tokenizer special tokens.
+            clean_up_tokenization_spaces: Whether to normalize token spacing.
+            batch_size: Optional per-stage batch size override.
+            concurrency: Optional per-stage concurrency override.
+            child_configs: Upstream node configs.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            Input column contains list/tuple token ids for decodable rows.
+        """
         super().__init__(runtime, child_configs)
         self.tokenizer_name_or_path = tokenizer_name_or_path
         self.input_col = input_col
@@ -34,16 +62,57 @@ class Detokenization(PipelineNode):
         self.concurrency = concurrency
 
     def run(self):
+        """Execute detokenization on child dataset output.
+
+        Inputs/outputs:
+            Reads child dataset(s) and returns detokenized dataset.
+
+        Side effects:
+            Delegates to tokenizer-loading map-batches helper.
+
+        Assumptions:
+            Child datasets are union-compatible by position.
+        """
         ds = union_children(self.children, by_name=False)
         return self.detokenize(ds)
 
     def detokenize(self, ds):
+        """Decode token-id arrays into text strings.
+
+        Args:
+            ds: Source dataset containing token-id column.
+
+        Returns:
+            Dataset with decoded output column.
+
+        Side effects:
+            Loads tokenizer model once per worker and runs map tasks.
+
+        Assumptions:
+            Non-list token values remain undecoded (`None`).
+        """
         tokenizer_name_or_path = self.tokenizer_name_or_path
         skip_special_tokens = self.skip_special_tokens
         clean_up_tokenization_spaces = self.clean_up_tokenization_spaces
 
         def decode_batch(batch: pd.DataFrame) -> pd.DataFrame:
+            """Decode one pandas batch while preserving row positions.
+
+            Args:
+                batch: Source pandas batch.
+
+            Returns:
+                Batch with decoded text output column.
+
+            Side effects:
+                Lazily loads tokenizer resources.
+
+            Assumptions:
+                Only list/tuple token values are valid decode candidates.
+            """
             if not hasattr(decode_batch, "tokenizer"):
+                # NOTE(readability): Keep tokenizer cached on function object so
+                # each worker process reuses it across multiple batches.
                 decode_batch.tokenizer = AutoTokenizer.from_pretrained(
                     tokenizer_name_or_path
                 )
@@ -97,6 +166,11 @@ class BatchDetokenization(Detokenization):
         concurrency: int | None = None,
         child_configs: list = None,
     ) -> None:
+        """Forward to `Detokenization` while preserving legacy alias defaults.
+
+        This constructor intentionally avoids duplicating base-class semantics;
+        see `Detokenization.__init__` for detailed argument behavior.
+        """
         super().__init__(
             runtime=runtime,
             tokenizer_name_or_path=tokenizer_name_or_path,

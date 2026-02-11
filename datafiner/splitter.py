@@ -1,3 +1,10 @@
+"""Dataset splitting node and standalone CLI for train/validation outputs.
+
+This module provides a pipeline node that splits one dataset and writes both
+splits to Lance, plus a direct CLI wrapper for ad-hoc execution.
+See also `datafiner/data_writer.py` for general write-mode behavior.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -37,6 +44,32 @@ class Splitter(PipelineNode):
         child_configs: list = None,
         storage_options: dict | None = None,
     ) -> None:
+        """Initialize split strategy and output write configuration.
+
+        Args:
+            runtime: Shared runtime config.
+            train_file: Lance path for train split output.
+            val_file: Lance path for validation split output.
+            num_train: Target number of training rows.
+            split_method: `exact` or `fast_approximate`.
+            shuffle: Whether to shuffle before exact splitting.
+            num_train_files: Optional train output block count.
+            num_val_files: Optional val output block count.
+            mode: Write mode for both outputs.
+            select_cols: Optional projection before splitting.
+            shuffle_train: Whether to shuffle resulting train split.
+            child_configs: Upstream node configs.
+            storage_options: Optional storage options override.
+
+        Returns:
+            None.
+
+        Side effects:
+            None during initialization.
+
+        Assumptions:
+            `num_train` is positive and both output paths are writable.
+        """
         super().__init__(runtime, child_configs)
 
         if not isinstance(num_train, int) or num_train <= 0:
@@ -57,6 +90,17 @@ class Splitter(PipelineNode):
         self.storage_options = storage_options or self.runtime.storage_options
 
     def run(self):
+        """Split child dataset and write both train/validation Lance outputs.
+
+        Inputs/outputs:
+            Reads child dataset and returns validation dataset after writes.
+
+        Side effects:
+            May shuffle, materialize, and write two Lance datasets.
+
+        Assumptions:
+            Split outputs are deterministic for a fixed input and seed values.
+        """
         ds = union_children(self.children, by_name=False)
 
         if self.shuffle and self.split_method == "exact":
@@ -81,6 +125,22 @@ class Splitter(PipelineNode):
         return val_ds
 
     def _write_split(self, ds, path: str, num_files: int):
+        """Write one split dataset to Lance with configured mode/partition count.
+
+        Args:
+            ds: Split dataset to persist.
+            path: Output Lance path.
+            num_files: Optional block count target before write.
+
+        Returns:
+            None.
+
+        Side effects:
+            Repartitions and writes Lance files.
+
+        Assumptions:
+            Mode mapping mirrors writer semantics used elsewhere in the project.
+        """
         if num_files:
             ds = ds.repartition(num_files, shuffle=False)
 
@@ -100,6 +160,20 @@ class Splitter(PipelineNode):
         )
 
     def _split_exact(self, ds) -> Tuple:
+        """Produce deterministic head/tail split with exact train row count.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            `(train_ds, val_ds)` tuple.
+
+        Side effects:
+            May materialize full dataset when `split_at_indices` is unavailable.
+
+        Assumptions:
+            Row ordering at split time is already finalized by prior stages.
+        """
         print(f"Using 'exact' split method for {self.num_train} training rows.")
         if hasattr(ds, "split_at_indices"):
             return ds.split_at_indices([self.num_train])
@@ -114,6 +188,22 @@ class Splitter(PipelineNode):
         return dataset_from_pandas(train_pdf), dataset_from_pandas(val_pdf)
 
     def _split_fast_approximate(self, ds) -> Tuple:
+        """Produce approximate split using sampling-derived cutoff heuristics.
+
+        Args:
+            ds: Source dataset.
+
+        Returns:
+            `(train_ds, val_ds)` tuple.
+
+        Side effects:
+            Calls `count()` and materializes pandas frames for both source and
+            sampled subsets.
+
+        Assumptions:
+            This fast path prioritizes lower orchestration overhead over exact
+            stratified semantics.
+        """
         print(
             f"Using 'fast_approximate' split method for roughly {self.num_train} training rows."
         )
@@ -139,6 +229,8 @@ class Splitter(PipelineNode):
         if train_pdf.empty:
             return dataset_from_pandas(train_pdf), dataset_from_pandas(source_pdf)
 
+        # NOTE(readability): Historical behavior derives an approximate train
+        # size from sample length and then slices the original order by cutoff.
         marker_col = "__split_marker__"
         source_pdf[marker_col] = range(len(source_pdf))
         train_pdf = train_pdf.copy()
